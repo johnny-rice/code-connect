@@ -19,6 +19,7 @@ import {
 } from '../connect/project'
 import { logger } from '../common/logging'
 import { CodeConnectJSON } from '../connect/figma_connect'
+import { CodeConnectLabel, CodeConnectLanguage } from '../connect/label_language_mapping'
 import ts from 'typescript'
 import { FigmaConnectLink, FigmaConnectMeta } from '../connect/api'
 import { minimatch } from 'minimatch'
@@ -151,8 +152,8 @@ async function convertStorybookFile({
       },
       links,
       component: componentMetadata.component,
-      label: 'Storybook',
-      language: 'typescript',
+      label: CodeConnectLabel.Storybook,
+      language: CodeConnectLanguage.TypeScript,
       metadata: {
         cliVersion: require('../../package.json').version,
       },

@@ -21,6 +21,7 @@ import {
   ParseOptions,
 } from '../connect/parser_common'
 import { CodeConnectParser, DEFAULT_LABEL_PER_PARSER } from '../connect/project'
+import { CodeConnectLanguage } from '../connect/label_language_mapping'
 import { format } from 'prettier'
 
 function getHtmlTaggedTemplateNode(node: ts.Node): ts.TaggedTemplateExpression | undefined {
@@ -202,6 +203,7 @@ export function parseExampleTemplate(
   exp: ts.ArrowFunction,
   parserContext: ParserContext,
   propMappings?: PropMappings,
+  skipTemplateHelpers?: boolean,
 ) {
   const { sourceFile } = parserContext
 
@@ -230,7 +232,10 @@ export function parseExampleTemplate(
     }
     let exampleCode = printer.printNode(ts.EmitHint.Unspecified, exp.body, sourceFile)
 
-    let templateCode = getParsedTemplateHelpersString() + '\n\n'
+    let templateCode = ''
+    if (!skipTemplateHelpers) {
+      templateCode = getParsedTemplateHelpersString() + '\n\n'
+    }
 
     templateCode += `const figma = require('figma')\n\n`
 
@@ -416,7 +421,10 @@ export function parseExampleTemplate(
     )
   }
 
-  let templateCode = getParsedTemplateHelpersString() + '\n\n'
+  let templateCode = ''
+  if (!skipTemplateHelpers) {
+    templateCode = getParsedTemplateHelpersString() + '\n\n'
+  }
 
   templateCode += `const figma = require('figma')\n\n`
 
@@ -564,7 +572,7 @@ function parseConfigObjectArg(
 export async function parseHtmlDoc(
   node: ts.CallExpression,
   parserContext: ParserContext,
-  _: ParseOptions,
+  { skipTemplateHelpers }: ParseOptions,
 ): Promise<CodeConnectJSON> {
   const { checker, sourceFile, config } = parserContext
 
@@ -588,7 +596,9 @@ export async function parseHtmlDoc(
   const metadata: any = undefined
 
   const props = propsArg ? parsePropsObject(propsArg, parserContext) : undefined
-  const render = exampleArg ? parseExampleTemplate(exampleArg, parserContext, props) : undefined
+  const render = exampleArg
+    ? parseExampleTemplate(exampleArg, parserContext, props, skipTemplateHelpers)
+    : undefined
   const variant = variantArg ? parseVariant(variantArg, sourceFile, checker) : undefined
   const links = linksArg ? parseLinks(linksArg, parserContext) : undefined
 
@@ -607,7 +617,7 @@ export async function parseHtmlDoc(
   return {
     figmaNode,
     label: DEFAULT_LABEL_PER_PARSER.html!,
-    language: 'html',
+    language: CodeConnectLanguage.HTML,
     component: metadata?.component,
     source: '',
     sourceLocation: { line: -1 },

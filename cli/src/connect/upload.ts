@@ -10,6 +10,7 @@ interface Args {
   docs: CodeConnectJSON[]
   batchSize?: number
   verbose: boolean
+  apiUrl?: string
 }
 
 interface UploadResponse {
@@ -78,8 +79,14 @@ export function createDocsMap(
   return docsMap
 }
 
-export async function upload({ accessToken, docs, batchSize, verbose }: Args) {
-  const apiUrl = getApiUrl(docs?.[0]?.figmaNode ?? '') + '/code_connect'
+export async function upload({
+  accessToken,
+  docs,
+  batchSize,
+  verbose,
+  apiUrl: apiUrlOverride,
+}: Args) {
+  const apiUrl = getApiUrl(docs?.[0]?.figmaNode ?? '', apiUrlOverride) + '/code_connect'
 
   try {
     logger.info(`Uploading to Figma...`)
@@ -183,6 +190,7 @@ export async function upload({ accessToken, docs, batchSize, verbose }: Args) {
       }
 
       logger.debug(`Uploading ${size.toFixed(2)}mb to Figma`)
+      logger.info(`uploading to ${apiUrl}`)
 
       const response = await request.post<UploadResponse>(apiUrl, docs, {
         headers: getHeaders(accessToken),

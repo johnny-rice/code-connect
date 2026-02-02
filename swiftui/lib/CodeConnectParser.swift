@@ -97,12 +97,14 @@ class StructDefinitionFinder: SyntaxVisitor {
 class FigmaConnectStructVisitor: SyntaxVisitor {
     let importMapping: [String: String]
     let baseUrl: URL
+    let skipTemplateHelpers: Bool
     var docs: [CodeConnectDoc] = []
     var messages: [ParserResultMessage] = []
 
-    init(importMapping: [String: String], baseUrl: URL) {
+    init(importMapping: [String: String], baseUrl: URL, skipTemplateHelpers: Bool = false) {
         self.importMapping = importMapping
         self.baseUrl = baseUrl
+        self.skipTemplateHelpers = skipTemplateHelpers
         super.init(viewMode: .fixedUp)
     }
 
@@ -318,7 +320,7 @@ class FigmaConnectStructVisitor: SyntaxVisitor {
             imports: imports,
             nestable: codeBlock.nestable
         )
-        let templateWriter = CodeConnectTemplateWriter(code: codeBlock, templateData: templateData)
+        let templateWriter = CodeConnectTemplateWriter(code: codeBlock, templateData: templateData, skipTemplateHelpers: skipTemplateHelpers)
         guard let template = templateWriter.createTemplate() else {
             throw ParserError.failedToParseExampleDefinition(connectionName: node.name.text)
         }
@@ -363,7 +365,8 @@ public enum CodeConnectParser {
     // Generate code connect files based on files in paths.
     public static func createCodeConnects(
         _ paths: [URL],
-        importMapping: [String: String]
+        importMapping: [String: String],
+        skipTemplateHelpers: Bool = false
     ) -> CodeConnectParserResult {
         // Maps a set of component names to Code Connect files, one component may have multiple.
         var docs: [String: [CodeConnectDoc]] = [:]
@@ -374,7 +377,7 @@ public enum CodeConnectParser {
             do {
                 guard let file = try? String(contentsOf: url) else { return }
                 let syntaxTree = Parser.parse(source: file)
-                let finder = FigmaConnectStructVisitor(importMapping: importMapping, baseUrl: url)
+                let finder = FigmaConnectStructVisitor(importMapping: importMapping, baseUrl: url, skipTemplateHelpers: skipTemplateHelpers)
                 finder.walk(syntaxTree)
                 finder.docs.forEach { doc in
                     if let component = doc.component {

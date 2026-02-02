@@ -265,8 +265,9 @@ export async function validateDocs(
   cmd: BaseCommand,
   accessToken: string,
   docs: CodeConnectJSON[],
+  apiUrlOverride?: string,
 ): Promise<boolean> {
-  let baseApiUrl = getApiUrl(docs?.[0]?.figmaNode ?? '') + '/files/'
+  let baseApiUrl = getApiUrl(docs?.[0]?.figmaNode ?? '', apiUrlOverride) + '/files/'
 
   const fileKeyToNodeIds: { [key: string]: any } = {}
   let valid = true

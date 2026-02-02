@@ -53,7 +53,8 @@ export async function createCodeConnectFromUrl({
     const nodeIds = parseNodeIds([figmaNodeUrl])
 
     const apiUrl =
-      getApiUrl(figmaNodeUrl ?? '') + `/code_connect/${fileKey}/cli_data?ids=${nodeIds.join(',')}`
+      getApiUrl(figmaNodeUrl ?? '', cmd.apiUrl || projectInfo.config.apiUrl) +
+      `/code_connect/${fileKey}/cli_data?ids=${nodeIds.join(',')}`
 
     if (nodeIds.length === 0) {
       exitWithError(

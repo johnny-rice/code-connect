@@ -205,11 +205,14 @@ fileprivate struct FigmaConditionalTemplate {
 struct CodeConnectTemplateWriter {
     let code: CodeBlockItemListSyntax
     let templateData: TemplateData
+    let skipTemplateHelpers: Bool
 
     func createTemplate() -> String? {
         var lines = [String]()
         lines.append("const figma = require('figma')\n")
-        lines.append(JSTemplateHelpers.swiftChildrenRenderFn)
+        if !skipTemplateHelpers {
+            lines.append(JSTemplateHelpers.swiftChildrenRenderFn)
+        }
         lines.append(contentsOf: createPropDefinitions())
         lines.append(rewriteCodeBlockWithTemplate())
         return lines.joined(separator: "\n")

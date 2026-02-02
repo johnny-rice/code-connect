@@ -10,6 +10,7 @@ export type BaseCodeConnectObject = {
     props?: Record<string, Intrinsic>
     imports?: string[]
     nestable?: boolean
+    isParserless?: boolean
   }
   language: string
   label: string

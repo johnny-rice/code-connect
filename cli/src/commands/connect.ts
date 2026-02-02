@@ -22,6 +22,7 @@ import { callParser, handleMessages } from '../connect/parser_executables'
 import { fromError } from 'zod-validation-error'
 import { ParseRequestPayload, ParseResponsePayload } from '../connect/parser_executable_types'
 import z from 'zod'
+import path from 'path'
 import { withUpdateCheck } from '../common/updates'
 import { exitWithFeedbackMessage } from '../connect/helpers'
 import { parseHtmlDoc } from '../html/parser'
@@ -34,6 +35,10 @@ import {
   ResolveImportsFn,
 } from '../connect/parser_common'
 import { findAndResolveImports, parseReactDoc } from '../react/parser'
+import { CodeConnectLabel, getInferredLanguageForRaw } from '../connect/label_language_mapping'
+import { writeTemplateFile } from '../connect/migration_helpers'
+import { convertRemoteFileUrlToRelativePath } from '../connect/wizard/run_wizard'
+import { getGitRepoAbsolutePath } from '../connect/project'
 
 export type BaseCommand = commander.Command & {
   token: string
@@ -46,6 +51,7 @@ export type BaseCommand = commander.Command & {
   jsonFile: string
   skipUpdateCheck: boolean
   exitOnUnreadableFiles: boolean
+  apiUrl?: string
 }
 
 function addBaseCommand(command: commander.Command, name: string, description: string) {
@@ -59,6 +65,7 @@ function addBaseCommand(command: commander.Command, name: string, description: s
     .option('-o --outFile <file>', 'specify a file to output generated Code Connect')
     .option('-o --outDir <dir>', 'specify a directory to output generated Code Connect')
     .option('-c --config <path>', 'path to a figma config file')
+    .option('-a --api-url <url>', 'custom Figma API URL to use instead of https://api.figma.com/v1')
     .option('--skip-update-check', 'skips checking for an updated version of the Figma CLI')
     .option(
       '--exit-on-unreadable-files',
@@ -125,6 +132,19 @@ export function addConnectCommandToProgram(program: commander.Command) {
   )
     .argument('<figma-node-url>', 'Figma node URL to create the Code Connect file from')
     .action(withUpdateCheck(handleCreate))
+
+  addBaseCommand(
+    connectCommand,
+    'migrate',
+    'Parse Code Connect files and migrate their templates into .figma.template.js files that can be published directly without parsing.',
+  )
+    .argument('[pattern]', 'glob pattern to match files (optional, uses config if not provided)')
+    .option('-l --label <label>', 'label to apply to the migrated templates')
+    .option(
+      '--output-dir <dir>',
+      'directory to write template files (default: same directory as source file)',
+    )
+    .action(withUpdateCheck(handleMigrate))
 }
 
 export function getAccessToken(cmd: BaseCommand) {
@@ -187,20 +207,46 @@ function transformDocFromParser(
   }
 }
 
-export function parseRawFile(filePath: string, label: string | undefined): CodeConnectJSON {
+export function parseRawFile(
+  filePath: string,
+  label: string | undefined,
+  config?: CodeConnectConfig,
+  dir?: string,
+): CodeConnectJSON {
   const fileContent = fs.readFileSync(filePath, 'utf-8')
   const [firstLine, ...templateLines] = fileContent.split('\n')
-  const figmaNodeUrl = firstLine.replace(/\/\/\s*url=/, '').trim()
+  let figmaNodeUrl = firstLine.replace(/\/\/\s*url=/, '').trim()
   const template = templateLines.join('\n')
+
+  // Apply documentUrlSubstitutions if provided
+  if (config?.documentUrlSubstitutions) {
+    Object.entries(config.documentUrlSubstitutions).forEach(([from, to]) => {
+      figmaNodeUrl = figmaNodeUrl.replace(from, to)
+    })
+  }
+
+  // Determine effective label from parameter, config, or default
+  const effectiveLabel = label || config?.label || CodeConnectLabel.Code
+
+  const language = config?.language || getInferredLanguageForRaw(effectiveLabel)
+
+  // Compute source path relative to git root
+  let source = ''
+  if (dir) {
+    const gitRootPath = getGitRepoAbsolutePath(dir)
+    if (gitRootPath) {
+      source = path.relative(gitRootPath, filePath)
+    }
+  }
 
   return {
     figmaNode: figmaNodeUrl,
     template,
     // nestable by default unless user specifies otherwise
-    templateData: { nestable: true },
-    language: 'raw',
-    label: label || 'Code',
-    source: '',
+    templateData: { nestable: true, isParserless: true },
+    language,
+    label: effectiveLabel,
+    source,
     sourceLocation: { line: -1 },
     metadata: {
       cliVersion: require('../../package.json').version,
@@ -212,6 +258,7 @@ export async function getCodeConnectObjects(
   cmd: BaseCommand & { label?: string; includeTemplateFiles?: boolean },
   projectInfo: ProjectInfo,
   silent = false,
+  skipTemplateHelpers = false,
 ): Promise<CodeConnectJSON[]> {
   if (cmd.jsonFile) {
     try {
@@ -228,6 +275,7 @@ export async function getCodeConnectObjects(
       projectInfo as ProjectInfo<CodeConnectReactConfig>,
       cmd,
       silent,
+      skipTemplateHelpers,
     )
   } else if (projectInfo.config.parser === 'html') {
     codeConnectObjects = await getCodeConnectObjectsFromParseFn({
@@ -236,12 +284,13 @@ export async function getCodeConnectObjects(
       projectInfo,
       cmd,
       silent,
+      skipTemplateHelpers,
     })
   } else {
     const payload: ParseRequestPayload = {
       mode: 'PARSE',
       paths: projectInfo.files,
-      config: projectInfo.config,
+      config: { ...projectInfo.config, skipTemplateHelpers },
       verbose: cmd.verbose,
     }
 
@@ -287,7 +336,12 @@ export async function getCodeConnectObjects(
       f.endsWith('.figma.template.js'),
     )
 
-    const rawTemplateDocs = rawTemplateFiles.map((file) => parseRawFile(file, cmd.label))
+    // Resolve the label before parsing so language inference works correctly
+    const resolvedLabel = cmd.label || projectInfo.config.label
+
+    const rawTemplateDocs = rawTemplateFiles.map((file) =>
+      parseRawFile(file, resolvedLabel, projectInfo.config, projectInfo.absPath),
+    )
 
     codeConnectObjects = codeConnectObjects.concat(rawTemplateDocs)
   }
@@ -296,6 +350,13 @@ export async function getCodeConnectObjects(
     logger.info(`Using label "${cmd.label || projectInfo.config.label}"`)
     codeConnectObjects.forEach((doc) => {
       doc.label = cmd.label || projectInfo.config.label || doc.label
+    })
+  }
+
+  if (projectInfo.config.language) {
+    logger.info(`Using language "${projectInfo.config.language}"`)
+    codeConnectObjects.forEach((doc) => {
+      doc.language = projectInfo.config.language || doc.language
     })
   }
 
@@ -309,6 +370,7 @@ type GetCodeConnectObjectsArgs = {
   projectInfo: ProjectInfo<CodeConnectConfig>
   cmd: BaseCommand
   silent?: boolean
+  skipTemplateHelpers?: boolean
 }
 
 // React/Storybook and HTML parsers are handled as special cases for now, they
@@ -327,6 +389,8 @@ async function getCodeConnectObjectsFromParseFn({
   cmd,
   /** Silences console output */
   silent = false,
+  /** Skip template helpers (used for extract command) */
+  skipTemplateHelpers = false,
 }: GetCodeConnectObjectsArgs) {
   const codeConnectObjects: CodeConnectJSON[] = []
 
@@ -346,6 +410,7 @@ async function getCodeConnectObjectsFromParseFn({
           repoUrl: remoteUrl,
           debug: cmd.verbose,
           silent,
+          skipTemplateHelpers,
         },
       })
 
@@ -384,6 +449,7 @@ async function getReactCodeConnectObjects(
   projectInfo: ProjectInfo<CodeConnectReactConfig>,
   cmd: BaseCommand,
   silent = false,
+  skipTemplateHelpers = false,
 ) {
   const codeConnectObjects = await getCodeConnectObjectsFromParseFn({
     parseFn: parseReactDoc,
@@ -392,6 +458,7 @@ async function getReactCodeConnectObjects(
     projectInfo,
     cmd,
     silent,
+    skipTemplateHelpers,
   })
 
   const storybookCodeConnectObjects = await convertStorybookFiles({
@@ -436,7 +503,12 @@ async function handlePublish(
   } else {
     logger.info('Validating Code Connect files...')
     var start = new Date().getTime()
-    const valid = await validateDocs(cmd, accessToken, codeConnectObjects)
+    const valid = await validateDocs(
+      cmd,
+      accessToken,
+      codeConnectObjects,
+      cmd.apiUrl || projectInfo.config.apiUrl,
+    )
     if (!valid) {
       exitWithFeedbackMessage(1)
     } else {
@@ -460,7 +532,13 @@ async function handlePublish(
     }
   }
 
-  upload({ accessToken, docs: codeConnectObjects, batchSize: batchSize, verbose: cmd.verbose })
+  upload({
+    accessToken,
+    docs: codeConnectObjects,
+    batchSize: batchSize,
+    verbose: cmd.verbose,
+    apiUrl: cmd.apiUrl || projectInfo.config.apiUrl,
+  })
 }
 
 async function handleUnpublish(cmd: BaseCommand & { node: string; label: string }) {
@@ -474,14 +552,14 @@ async function handleUnpublish(cmd: BaseCommand & { node: string; label: string 
 
   let nodesToDeleteRelevantInfo
 
+  const projectInfo = await getProjectInfo(dir, cmd.config)
+
   if (cmd.node) {
     if (!cmd.label) {
       exitWithError('Label is required when specifying a node')
     }
     nodesToDeleteRelevantInfo = [{ figmaNode: cmd.node, label: cmd.label }]
   } else {
-    const projectInfo = await getProjectInfo(dir, cmd.config)
-
     const codeConnectObjects = await getCodeConnectObjects(cmd, projectInfo)
 
     nodesToDeleteRelevantInfo = codeConnectObjects.map((doc) => ({
@@ -504,6 +582,7 @@ async function handleUnpublish(cmd: BaseCommand & { node: string; label: string 
   delete_docs({
     accessToken,
     docs: nodesToDeleteRelevantInfo,
+    apiUrl: cmd.apiUrl || projectInfo.config.apiUrl,
   })
 }
 
@@ -552,4 +631,112 @@ async function handleCreate(nodeUrl: string, cmd: BaseCommand) {
     projectInfo,
     cmd,
   })
+}
+
+async function handleMigrate(pattern: string | undefined, cmd: BaseCommand) {
+  setupHandler(cmd)
+
+  const dir = cmd.dir ?? process.cwd()
+  let projectInfo = await getProjectInfo(dir, cmd.config)
+
+  // Clear documentUrlSubstitutions so we preserve original URLs in migrated templates
+  projectInfo = {
+    ...projectInfo,
+    config: {
+      ...projectInfo.config,
+      documentUrlSubstitutions: {},
+    },
+  }
+
+  // If a glob pattern is provided, override the project files
+  if (pattern) {
+    const { globSync } = require('glob')
+    const files = globSync(pattern, {
+      cwd: dir,
+      absolute: true,
+      nodir: true,
+    })
+
+    if (files.length === 0) {
+      exitWithError(`No files found matching pattern: ${pattern}`)
+    }
+
+    logger.info(`Found ${files.length} file(s) matching pattern: ${pattern}`)
+    projectInfo = {
+      ...projectInfo,
+      files,
+    }
+  }
+
+  // Parse the files to get Code Connect objects
+  const codeConnectObjects = await getCodeConnectObjects(cmd, projectInfo, false, true)
+
+  if (codeConnectObjects.length === 0) {
+    exitWithError('No Code Connect objects found to migrate')
+  }
+
+  logger.info(`Found ${codeConnectObjects.length} Code Connect object(s) to migrate`)
+  let migratedCount = 0
+  let skippedCount = 0
+  const errors: string[] = []
+
+  // Get git root path for converting remote URLs to local paths
+  const gitRootPath = getGitRepoAbsolutePath(dir)
+
+  // Migrate each Code Connect object to a template file
+  for (const doc of codeConnectObjects) {
+    try {
+      // Skip if no template (shouldn't happen, but be safe)
+      if (!doc.template) {
+        logger.warn(`Skipping ${doc.figmaNode}: no template found`)
+        skippedCount++
+        continue
+      }
+
+      // Convert remote file URL to local path if needed
+      let localSourcePath: string | undefined
+      if (doc.source && gitRootPath) {
+        const relativePath = convertRemoteFileUrlToRelativePath({
+          remoteFileUrl: doc.source,
+          gitRootPath,
+          dir,
+        })
+        if (relativePath) {
+          // Convert relative path to absolute path for writeTemplateFile
+          localSourcePath = path.resolve(dir, relativePath)
+        }
+      }
+
+      const { outputPath, skipped } = writeTemplateFile(doc, cmd.outDir, dir, localSourcePath)
+
+      if (skipped) {
+        logger.warn(`Skipping ${outputPath}: file already exists`)
+        skippedCount++
+      } else {
+        logger.info(`${success('✓')} Migrated to ${highlight(outputPath)}`)
+        migratedCount++
+      }
+    } catch (error) {
+      const errorMsg = `Failed to migrate ${doc.figmaNode}: ${error}`
+      logger.error(errorMsg)
+      errors.push(errorMsg)
+    }
+  }
+
+  // Summary
+  console.log('')
+  logger.info(
+    `Migration complete: ${success(`${migratedCount} migrated`)}, ${skippedCount} skipped`,
+  )
+
+  if (errors.length > 0) {
+    console.log('')
+    logger.error(`Encountered ${errors.length} error(s):`)
+    errors.forEach((err) => logger.error(`  ${err}`))
+    process.exit(1)
+  }
+
+  if (migratedCount === 0) {
+    exitWithError('No files were migrated')
+  }
 }

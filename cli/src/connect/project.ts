@@ -9,6 +9,7 @@ import readline from 'readline'
 // We use an old version of this dep as I couldn't get ES modules working
 import findUp from 'find-up'
 import { exitWithFeedbackMessage } from './helpers'
+import { CodeConnectLabel, CodeConnectLanguage } from './label_language_mapping'
 
 const DEFAULT_CONFIG_FILE_NAME = 'figma.config.json'
 const ENV_FILE_NAME = '.env'
@@ -24,8 +25,8 @@ export const DEFAULT_INCLUDE_GLOBS_BY_PARSER = {
 }
 
 export const DEFAULT_LABEL_PER_PARSER: Partial<Record<CodeConnectParser, string>> = {
-  react: 'React',
-  html: 'Web Components',
+  react: CodeConnectLabel.React,
+  html: CodeConnectLabel.WebComponents,
 }
 
 // First party parsers which call into parser executables
@@ -66,9 +67,21 @@ export type BaseCodeConnectConfig = {
   label?: string
 
   /**
+   * Language to use for syntax highlighting in the uploaded code examples.
+   * Valid values: 'typescript', 'swift', 'kotlin', 'html', 'raw'
+   * If not specified, language is inferred from the label or parser type.
+   */
+  language?: string
+
+  /**
    * The URL of the Figma file to use during the interactive setup wizard for connecting code components to Figma components.
    */
   interactiveSetupFigmaFileUrl?: string
+
+  /**
+   * Custom Figma API URL to use instead of https://api.figma.com/v1
+   */
+  apiUrl?: string
 }
 
 export type CodeConnectExecutableParserConfig = BaseCodeConnectConfig & {
@@ -252,11 +265,11 @@ export function determineLabelFromProject(dir: string): string | undefined {
         const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'))
         if (packageJsonContains(packageJson, 'angular')) {
           showMessage('Angular', 'angular', packageJson, currentDir)
-          label = 'Angular'
+          label = CodeConnectLabel.Angular
           return findUp.stop
         } else if (packageJsonContains(packageJson, 'vue')) {
           showMessage('Vue', 'vue', packageJson, currentDir)
-          label = 'Vue'
+          label = CodeConnectLabel.Vue
           return findUp.stop
         }
       }
@@ -738,6 +751,24 @@ export async function getProjectInfoFromConfig(
 }
 
 /**
+ * Validates the language field in the config.
+ * Throws an error if the language is invalid.
+ *
+ * @param language The language string to validate
+ */
+function validateLanguage(language: string | undefined): void {
+  if (!language) return
+
+  const validLanguages = Object.values(CodeConnectLanguage)
+  if (!validLanguages.includes(language as CodeConnectLanguage)) {
+    throw new Error(
+      `Invalid language "${language}" in figma.config.json. ` +
+        `Valid values are: ${validLanguages.join(', ')}`,
+    )
+  }
+}
+
+/**
  * Gets information about a project from a directory.
  *
  * @param dir Directory containing the project
@@ -746,6 +777,9 @@ export async function getProjectInfoFromConfig(
  */
 export async function getProjectInfo(dir: string, configPath: string): Promise<ProjectInfo> {
   const { config } = await parseOrDetermineConfig(dir, configPath)
+
+  // Validate language field if present
+  validateLanguage(config.language)
 
   return getProjectInfoFromConfig(dir, config)
 }

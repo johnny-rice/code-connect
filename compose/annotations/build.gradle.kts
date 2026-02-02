@@ -8,6 +8,12 @@ plugins {
     id("org.jetbrains.dokka") version "1.9.20"
 }
 
+// Set group and version at the Gradle project level so that when other projects
+// (like the plugin) reference this project as a dependency, Gradle publishes
+// the correct Maven coordinates instead of defaulting to "FigmaCodeConnect:annotations:unspecified"
+group = property("GROUP").toString()
+version = property("VERSION_NAME").toString()
+
 java {
     toolchain {
         languageVersion.set(JavaLanguageVersion.of(17))

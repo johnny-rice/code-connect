@@ -30,6 +30,10 @@
     "declaration": true,
     "declarationMap": true,
 
+    // Include source files in the source map. This is the recommended practice for rules_ts.
+    // https://github.com/aspect-build/rules_ts/blob/main/docs/troubleshooting.md#source-maps-missing
+    "inlineSources": true,
+
     // Maximize strictness.
     "strict": true,
     "noUnusedLocals": true,

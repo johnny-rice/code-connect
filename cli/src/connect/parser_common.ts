@@ -415,6 +415,7 @@ export type ParseOptions = {
   repoUrl?: string
   debug?: boolean
   silent?: boolean
+  skipTemplateHelpers?: boolean
 }
 
 export type ParseFn = (

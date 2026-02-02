@@ -59,7 +59,7 @@ class CodeConnectTemplateWriterTest: XCTestCase {
             imports: []
         )
 
-        let writer = CodeConnectTemplateWriter(code: code, templateData: templateData)
+        let writer = CodeConnectTemplateWriter(code: code, templateData: templateData, skipTemplateHelpers: false)
 
         let expectedTemplate = """
         const buttonVariant = figma.properties.enum('Variant', {
@@ -105,7 +105,7 @@ class CodeConnectTemplateWriterTest: XCTestCase {
             imports: []
         )
 
-        let writer = CodeConnectTemplateWriter(code: code, templateData: templateData)
+        let writer = CodeConnectTemplateWriter(code: code, templateData: templateData, skipTemplateHelpers: false)
 
         let expectedTemplate = """
         const isPrimary = figma.properties.enum('Type', {
@@ -146,7 +146,7 @@ class CodeConnectTemplateWriterTest: XCTestCase {
             imports: []
         )
 
-        let writer = CodeConnectTemplateWriter(code: code, templateData: templateData)
+        let writer = CodeConnectTemplateWriter(code: code, templateData: templateData, skipTemplateHelpers: false)
 
         let expectedTemplate = """
         const isPrimary = figma.properties.enum('Type', {
@@ -202,7 +202,7 @@ class CodeConnectTemplateWriterTest: XCTestCase {
             imports: []
         )
 
-        let writer = CodeConnectTemplateWriter(code: code, templateData: templateData)
+        let writer = CodeConnectTemplateWriter(code: code, templateData: templateData, skipTemplateHelpers: false)
 
         let expectedTemplate = """
         const isDisabled = figma.properties.enum('State', {
@@ -247,7 +247,7 @@ class CodeConnectTemplateWriterTest: XCTestCase {
             imports: []
         )
 
-        let writer = CodeConnectTemplateWriter(code: code, templateData: templateData)
+        let writer = CodeConnectTemplateWriter(code: code, templateData: templateData, skipTemplateHelpers: false)
 
         let expectedTemplate = """
         const disabled = figma.properties.enum('State', {
@@ -275,7 +275,7 @@ class CodeConnectTemplateWriterTest: XCTestCase {
             imports: []
         )
 
-        let writer = CodeConnectTemplateWriter(code: code, templateData: templateData)
+        let writer = CodeConnectTemplateWriter(code: code, templateData: templateData, skipTemplateHelpers: false)
 
         let expectedTemplate = """
         const contents = figma.properties.children(["A", "B"])
@@ -304,7 +304,7 @@ class CodeConnectTemplateWriterTest: XCTestCase {
             imports: []
         )
 
-        let writer = CodeConnectTemplateWriter(code: code, templateData: templateData)
+        let writer = CodeConnectTemplateWriter(code: code, templateData: templateData, skipTemplateHelpers: false)
 
         let expectedTemplate = """
         const icon = figma.properties.instance('Icon')

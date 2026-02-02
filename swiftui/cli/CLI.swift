@@ -19,6 +19,7 @@ struct Config: Decodable {
     let importPaths: [String: String]?
     let include: [String]?
     let exclude: [String]?
+    let skipTemplateHelpers: Bool?
 }
 
 enum RequestMode: String, Decodable {
@@ -67,7 +68,8 @@ struct CLI: AsyncParsableCommand {
 
             let result = CodeConnectParser.createCodeConnects(
                 parseRequest.paths.map { URL(fileURLWithPath: $0) },
-                importMapping: parseRequest.config.importPaths ?? [:]
+                importMapping: parseRequest.config.importPaths ?? [:],
+                skipTemplateHelpers: parseRequest.config.skipTemplateHelpers ?? false
             )
 
             try writeResultToStdout(result)

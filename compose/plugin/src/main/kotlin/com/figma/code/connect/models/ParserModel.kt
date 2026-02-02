@@ -96,10 +96,17 @@ enum class ComponentType {
 }
 
 @Serializable
+data class ParserConfig(
+    val skipTemplateHelpers: Boolean = false,
+    val autoAddImports: Boolean = true,
+)
+
+@Serializable
 data class CodeConnectParserParseInput(
     val mode: Mode,
     val paths: List<String>,
-    val autoAddImports: Boolean = true,
+    val config: ParserConfig = ParserConfig(),
+    val verbose: Boolean = false,
 )
 
 @Serializable

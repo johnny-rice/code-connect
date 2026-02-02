@@ -11,10 +11,11 @@ interface NodesToDeleteInfo {
 interface Args {
   accessToken: string
   docs: NodesToDeleteInfo[]
+  apiUrl?: string
 }
 
-export async function delete_docs({ accessToken, docs }: Args) {
-  const apiUrl = getApiUrl(docs?.[0]?.figmaNode ?? '') + '/code_connect'
+export async function delete_docs({ accessToken, docs, apiUrl: apiUrlOverride }: Args) {
+  const apiUrl = getApiUrl(docs?.[0]?.figmaNode ?? '', apiUrlOverride) + '/code_connect'
 
   try {
     logger.info(`Unpublishing Code Connect files from Figma...`)

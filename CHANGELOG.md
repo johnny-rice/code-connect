@@ -1,11 +1,29 @@
-# Code Connect v1.3.12
+# Code Connect v1.3.13 (29th January 2026)
+
+## Features
+
+- Add --api-url option to use a different code-connect api endpoint. This option can also be configured in figma.config.json with the `apiUrl` field
+- Add `language` config option to override syntax highlighting language in figma.config.json
+
+### Parserless
+
+- Syntax highlighting + formatting for parserless templates when publishing with a known label (e.g. React)
+
+## Fixed
+
+- Fix crash that occurs when the provided Figma file has no components
+- Set version number for annotations gradle plugin
+- Security update: upgraded undici to fix CVE-2026-22036. Roll back and report if you encounter networking issues.
+- Security update: upgraded lodash to fix CVE-2025-13465.
+
+# Code Connect v1.3.12 (10th December 2025)
+
+### General
 
 ## Fixed
 
 - Fixed a problem with path alias imports incorrectly importing index files
 - Fixed parsing failure for Compose in Windows.
-
-### General
 
 # Code Connect v1.3.11 (26th November 2025)
 

@@ -76,15 +76,19 @@ async function fetchTopLevelComponentsFromFile({
   accessToken,
   figmaUrl,
   cmd,
+  projectInfo,
 }: {
   accessToken: string
   figmaUrl: string
   cmd: BaseCommand
+  projectInfo?: ProjectInfo
 }) {
   // TODO enter create flow if node-id specified
   const fileKey = parseFileKey(figmaUrl)
 
-  const apiUrl = getApiUrl(figmaUrl ?? '') + `/code_connect/${fileKey}/cli_data`
+  const apiUrl =
+    getApiUrl(figmaUrl ?? '', cmd.apiUrl || projectInfo?.config.apiUrl) +
+    `/code_connect/${fileKey}/cli_data`
 
   try {
     const spinner = ora({
@@ -1015,9 +1019,11 @@ export async function runWizard(cmd: BaseCommand) {
     accessToken,
     figmaUrl: figmaFileUrl,
     cmd,
+    projectInfo,
   })
 
-  if (!componentsFromFile) {
+  if (!componentsFromFile || componentsFromFile.length === 0) {
+    logger.info('No components found in the provided Figma file.')
     exitWithFeedbackMessage(1)
   }
 

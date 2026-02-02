@@ -14,6 +14,7 @@ class JSTemplateCreator {
     fun createTemplate(
         code: KtExpression,
         templateData: TemplateData,
+        skipTemplateHelpers: Boolean = false,
     ): String {
         val propertyDefinitions =
             templateData.props?.map { (key, value) ->
@@ -24,9 +25,11 @@ class JSTemplateCreator {
 
         val templateCode = replaceVariableReferences(code, templateData)
 
+        val templateHelpers = if (skipTemplateHelpers) "" else JSTemplateHelpers.renderComposeChildrenFunctionDefinition
+
         return """
             const figma = require('figma')
-            ${JSTemplateHelpers.renderComposeChildrenFunctionDefinition}
+            $templateHelpers
             $propertyDefinitions
             export default figma.kotlin`$templateCode`
             """.trimIndent()

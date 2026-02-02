@@ -106,7 +106,7 @@ class FigmaCodeConnectPlugin : Plugin<Project> {
                             PsiManager.getInstance(kotlinCoreEnvironment.project)
                                 .findFile(file) as KtFile
 
-                        val parserResult = CodeConnectParser.parseFile((ktFile))
+                        val parserResult = CodeConnectParser.parseFile(ktFile, codeConnectParserParseInput.config.skipTemplateHelpers)
                         documents.addAll(parserResult.docs)
                         messages.addAll(parserResult.messages)
                         // Get all the line numbers for all @Composable functions to assign a SourceLocation
@@ -124,7 +124,7 @@ class FigmaCodeConnectPlugin : Plugin<Project> {
                         }
                         doc.sourceLocation = sourceInformation.second
 
-                        if (codeConnectParserParseInput.autoAddImports) {
+                        if (codeConnectParserParseInput.config.autoAddImports) {
                             sourceInformation.first?.let {
                                 doc.templateData.imports += it
                             }

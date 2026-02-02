@@ -14,7 +14,7 @@ describe('extractSignature', () => {
       exportName: 'LotsOfProps',
       expectedProps: {
         children:
-          'undefined | null | string | number | false | true | ReactElement<any, string | JSXElementConstructor<any>> | ReactFragment | ReactPortal',
+          'undefined | null | string | number | false | true | ReactElement<any, string | JSXElementConstructor<any>> | Iterable<ReactNode> | ReactPortal',
         onClick: 'MouseEventHandler<HTMLDivElement>',
         title: 'string',
         hasIcon: 'false | true',

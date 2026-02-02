@@ -156,11 +156,13 @@ async function getEmbeddingsMatchResults({
   accessToken,
   figmaUrl,
   mockResponseName,
+  apiUrlOverride,
 }: {
   propMappingData: PropMappingData
   accessToken: string
   figmaUrl: string
   mockResponseName?: string
+  apiUrlOverride?: string
 }) {
   const uniqueMatchableNames = getUniqueMatchableNames(propMappingData)
 
@@ -169,7 +171,7 @@ async function getEmbeddingsMatchResults({
   if (uniqueMatchableNames.length > 0) {
     const res = mockResponseName
       ? await getMockEmbeddingsResponse(uniqueMatchableNames, mockResponseName)
-      : await fetchEmbeddings({ uniqueMatchableNames, accessToken, figmaUrl })
+      : await fetchEmbeddings({ uniqueMatchableNames, accessToken, figmaUrl, apiUrlOverride })
 
     res?.meta.embeddings.forEach((embedding: number[], index: number) => {
       matchableNamesEmbeddings[uniqueMatchableNames[index]] = embedding
@@ -185,12 +187,14 @@ export async function generateAllPropsMappings({
   figmaUrl,
   useAi,
   mockResponseName,
+  apiUrlOverride,
 }: {
   propMappingData: PropMappingData
   accessToken: string
   figmaUrl: string
   useAi: boolean
   mockResponseName?: string
+  apiUrlOverride?: string
 }) {
   let allMatchResults: AllMatchResults = {}
 
@@ -201,6 +205,7 @@ export async function generateAllPropsMappings({
         accessToken,
         figmaUrl,
         mockResponseName,
+        apiUrlOverride,
       })
     } catch (e) {
       if (isFetchError(e)) {
@@ -265,6 +270,7 @@ export async function extractDataAndGenerateAllPropsMappings({
       accessToken,
       figmaUrl,
       useAi,
+      apiUrlOverride: cmd.apiUrl || projectInfo.config.apiUrl,
     }),
   }
 }

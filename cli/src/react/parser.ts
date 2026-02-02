@@ -6,6 +6,7 @@ import {
   mapImportPath,
   mapImportSpecifier,
 } from '../connect/project'
+import { CodeConnectLanguage } from '../connect/label_language_mapping'
 import { logger } from '../common/logging'
 import {
   bfsFindNode,
@@ -540,6 +541,7 @@ export function parseJSXRenderFunction(
   exp: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
   parserContext: ParserContext,
   propMappings?: PropMappings,
+  skipTemplateHelpers?: boolean,
 ) {
   const { sourceFile } = parserContext
 
@@ -553,7 +555,9 @@ export function parseJSXRenderFunction(
 
   // Generate the template code
   // Inject React-specific template helper functions
-  templateCode = getParsedTemplateHelpersString() + '\n\n'
+  if (!skipTemplateHelpers) {
+    templateCode = getParsedTemplateHelpersString() + '\n\n'
+  }
 
   // Require the template API
   templateCode += `const figma = require('figma')\n\n`
@@ -588,6 +592,7 @@ export function parseValueRenderFunction(
   exp: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
   parserContext: ParserContext,
   propMappings?: PropMappings,
+  skipTemplateHelpers?: boolean,
 ) {
   const { sourceFile } = parserContext
   const printer = ts.createPrinter()
@@ -604,7 +609,9 @@ export function parseValueRenderFunction(
   let templateCode = ''
   // Generate the template code
   // Inject React-specific template helper functions
-  templateCode = getParsedTemplateHelpersString() + '\n\n'
+  if (!skipTemplateHelpers) {
+    templateCode = getParsedTemplateHelpersString() + '\n\n'
+  }
 
   // Require the template API
   templateCode += `const figma = require('figma')\n\n`
@@ -882,7 +889,7 @@ export function getDefaultTemplate(
 export async function parseReactDoc(
   node: ts.CallExpression,
   parserContext: ParserContext,
-  { repoUrl, silent }: ParseOptions,
+  { repoUrl, silent, skipTemplateHelpers }: ParseOptions,
 ): Promise<CodeConnectJSON> {
   const { checker, sourceFile, config } = parserContext
 
@@ -909,8 +916,8 @@ export async function parseReactDoc(
   const props = propsArg ? parsePropsObject(propsArg, parserContext) : undefined
   const render = exampleArg
     ? findJSXElement(exampleArg)
-      ? parseJSXRenderFunction(exampleArg, parserContext, props)
-      : parseValueRenderFunction(exampleArg, parserContext, props)
+      ? parseJSXRenderFunction(exampleArg, parserContext, props, skipTemplateHelpers)
+      : parseValueRenderFunction(exampleArg, parserContext, props, skipTemplateHelpers)
     : undefined
   const variant = variantArg ? parseVariant(variantArg, sourceFile, checker) : undefined
   const links = linksArg ? parseLinks(linksArg, parserContext) : undefined
@@ -990,7 +997,7 @@ export async function parseReactDoc(
   return {
     figmaNode,
     label: DEFAULT_LABEL_PER_PARSER.react!,
-    language: 'typescript',
+    language: CodeConnectLanguage.TypeScript,
     component: metadata?.component,
     source: metadata?.source ? getRemoteFileUrl(metadata.source, repoUrl) : '',
     sourceLocation: metadata?.line !== undefined ? { line: metadata.line } : { line: -1 },

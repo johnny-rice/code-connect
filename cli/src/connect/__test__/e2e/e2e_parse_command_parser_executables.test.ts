@@ -13,7 +13,7 @@ describe('e2e test for `parse` command (parser executables)', () => {
         expect.objectContaining({
           figmaNode: `${path.join(testPath, 'Test.test')}`,
           template:
-            '{"config":{"parser":"__unit_test__","include":["*.test"],"exclude":["Excluded.test"]},"mode":"PARSE"}',
+            '{"config":{"parser":"__unit_test__","include":["*.test"],"exclude":["Excluded.test"],"skipTemplateHelpers":false},"mode":"PARSE"}',
           label: 'Test',
           source: expect.stringMatching(
             /https:\/\/github\.com\/figma\/[a-z-/]+\/cli\/src\/connect\/__test__\/e2e\/e2e_parse_command\/\w+\/Test\.test/,
@@ -22,7 +22,7 @@ describe('e2e test for `parse` command (parser executables)', () => {
         expect.objectContaining({
           figmaNode: `${path.join(testPath, 'OtherFile.test')}`,
           template:
-            '{"config":{"parser":"__unit_test__","include":["*.test"],"exclude":["Excluded.test"]},"mode":"PARSE"}',
+            '{"config":{"parser":"__unit_test__","include":["*.test"],"exclude":["Excluded.test"],"skipTemplateHelpers":false},"mode":"PARSE"}',
           label: 'Test',
           source: expect.stringMatching(
             /https:\/\/github\.com\/figma\/[a-z-/]+\/cli\/src\/connect\/__test__\/e2e\/e2e_parse_command\/\w+\/OtherFile\.test/,

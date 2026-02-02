@@ -46,9 +46,10 @@ object CodeConnectParser {
      * CodeConnectDocument.
      *
      * @param file The Kotlin file to parse.
+     * @param skipTemplateHelpers Whether to skip template helpers injection.
      * @return A CodeConnectParserOutput containing the parsed information.
      */
-    fun parseFile(file: KtFile): CodeConnectParserResult {
+    fun parseFile(file: KtFile, skipTemplateHelpers: Boolean = false): CodeConnectParserResult {
         val codeConnectDocuments = mutableListOf<CodeConnectDocument>()
         val messages = mutableListOf<CodeConnectParserMessage>()
         val functionLineNumbers = mutableMapOf<String, Int>()
@@ -61,7 +62,7 @@ object CodeConnectParser {
                 override fun visitClass(klass: KtClass) {
                     FigmaConnect::class.simpleName?.let { annotationName ->
                         klass.getAnnotation(annotationName)?.let {
-                            val result = parseFigmaConnectClass(klass, document)
+                            val result = parseFigmaConnectClass(klass, document, skipTemplateHelpers)
                             codeConnectDocuments.addAll(result.docs)
                             messages.addAll(result.messages)
                         }
@@ -91,11 +92,13 @@ object CodeConnectParser {
      *
      * @param klass The class to parse.
      * @param document The document associated with the class.
+     * @param skipTemplateHelpers Whether to skip template helpers injection.
      * @return A CodeConnectParserOutput containing the parsed information.
      */
     private fun parseFigmaConnectClass(
         klass: KtClass,
         document: Document?,
+        skipTemplateHelpers: Boolean = false,
     ): CodeConnectParserResult {
         val codeConnections = mutableListOf<CodeConnectDocument>()
         FigmaConnect::class.simpleName?.let { annotationName ->
@@ -140,7 +143,7 @@ object CodeConnectParser {
                     CodeConnectDocument(
                         component = component,
                         figmaNode = url,
-                        template = templateCreator.createTemplate(code, templateData),
+                        template = templateCreator.createTemplate(code, templateData, skipTemplateHelpers),
                         templateData = templateData,
                         variant = parseVariantsForClass(klass, document),
                     ),

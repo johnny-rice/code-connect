@@ -3,7 +3,11 @@ import { logger } from '../common/logging'
 
 const version = require('../../package.json').version
 
-export function getApiUrl(figmaNode: string) {
+export function getApiUrl(figmaNode: string, apiUrlOverride?: string) {
+  if (apiUrlOverride) {
+    logger.debug(`Using custom API URL: ${apiUrlOverride}`)
+    return apiUrlOverride
+  }
   return 'https://api.figma.com/v1'
 }
 

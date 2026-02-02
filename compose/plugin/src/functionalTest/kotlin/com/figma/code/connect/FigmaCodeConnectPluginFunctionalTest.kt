@@ -53,7 +53,10 @@ class FigmaCodeConnectPluginFunctionalTest {
                 "paths": [
                 "${kotlinComponent.absolutePath}"
                 ],
-                "autoAddImports" : $addImports
+                "config": {
+                    "autoAddImports": $addImports,
+                    "skipTemplateHelpers": false
+                }
             }
             """.trimIndent()
 

@@ -14,12 +14,14 @@ export async function fetchEmbeddings({
   uniqueMatchableNames,
   accessToken,
   figmaUrl,
+  apiUrlOverride,
 }: {
   uniqueMatchableNames: string[]
   accessToken: string
   figmaUrl: string
+  apiUrlOverride?: string
 }) {
-  const apiUrl = getApiUrl(figmaUrl)
+  const apiUrl = getApiUrl(figmaUrl, apiUrlOverride)
   const fileKey = parseFileKey(figmaUrl)
 
   const result = await request.post<EmbeddingsResponse>(
