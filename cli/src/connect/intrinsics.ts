@@ -35,6 +35,7 @@ export enum IntrinsicKind {
   NestedProps = 'nested-props',
   ClassName = 'className',
   TextContent = 'text-content',
+  Slot = 'slot',
 }
 
 export interface IntrinsicBase {
@@ -106,11 +107,19 @@ export interface FigmaTextContent extends IntrinsicBase {
   }
 }
 
+export interface FigmaSlot extends IntrinsicBase {
+  kind: IntrinsicKind.Slot
+  args: {
+    figmaPropName: string
+  }
+}
+
 export type Intrinsic =
   | FigmaBoolean
   | FigmaEnum
   | FigmaString
   | FigmaInstance
+  | FigmaSlot
   | FigmaChildren
   | FigmaNestedProps
   | FigmaClassName
@@ -240,6 +249,28 @@ makeIntrinsic('instance', (name) => {
 
       return {
         kind: IntrinsicKind.Instance,
+        args: {
+          figmaPropName: stripQuotesFromNode(figmaPropNameIdentifier),
+        },
+      }
+    },
+  }
+})
+
+makeIntrinsic('slot', (name) => {
+  return {
+    parse: (exp: ts.CallExpression, ctx: ParserContext): FigmaSlot => {
+      const { sourceFile } = ctx
+      const figmaPropNameIdentifier = exp.arguments?.[0]
+
+      assertIsStringLiteral(
+        figmaPropNameIdentifier,
+        sourceFile,
+        `${name} takes a single argument which is the Figma property name`,
+      )
+
+      return {
+        kind: IntrinsicKind.Slot,
         args: {
           figmaPropName: stripQuotesFromNode(figmaPropNameIdentifier),
         },
@@ -529,6 +560,9 @@ export function intrinsicToString(
 
       // Outputs: `const propName = figma.properties.enum('propName', { ... mapping object from above ... })`
       return `${selector}.__properties__.enum('${args.figmaPropName}', ${mappingString})`
+    }
+    case IntrinsicKind.Slot: {
+      return `${selector}.__properties__.slot('${args.figmaPropName}')`
     }
     case IntrinsicKind.Children: {
       // Outputs: `const propName = figma.properties.children(["Layer 1", "Layer 2"])`

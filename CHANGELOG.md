@@ -1,3 +1,19 @@
+# Code Connect v1.4.0 (18th February 2026)
+
+## Features
+
+### React
+
+- Add support for `figma.slot()` to map Figma slot layer properties in Code Connect files.
+
+### Parserless
+
+- Added a beta migration script to migrate parser-based Code Connect files to parserless templates under `figma connect migrate`.
+- The default extension for parserless/template files is now `.figma.js` instead of `.figma.template.js`. The old `.figma.template.js` extension is still fully supported for backwards compatibility.
+- Removed `--include-template-files` flag. Template files (`.figma.js` and `.figma.template.js`) are now always included when detected.
+- Add support for `instance.getSlot(name)` in templates to reference "slot" properties.
+- Parserless templates now support optional `component` and `source` comment fields (e.g., `// component=Button`)
+
 # Code Connect v1.3.13 (29th January 2026)
 
 ## Features

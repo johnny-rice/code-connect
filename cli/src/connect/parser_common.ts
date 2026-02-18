@@ -466,6 +466,7 @@ export async function parseCodeConnect<T extends BaseCodeConnectConfig>({
     if (isFigmaConnectCall(node, parserContext.sourceFile)) {
       const doc = await parseFn(node, parserContext, parseOptions)
       if (doc) {
+        doc._codeConnectFilePath = file
         codeConnectObjects.push(doc)
       }
     }

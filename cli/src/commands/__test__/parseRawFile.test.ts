@@ -1,5 +1,6 @@
 import { parseRawFile } from '../connect'
 import { CodeConnectConfig } from '../../connect/project'
+import { SyntaxHighlightLanguage } from '../../connect/label_language_mapping'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
@@ -125,12 +126,89 @@ export default figma.code\`<Button />\``
 
     const config: CodeConnectConfig = {
       parser: 'react',
-      language: 'kotlin',
+      language: SyntaxHighlightLanguage.Kotlin,
     }
 
     const result = parseRawFile(tempFilePath, 'React', config)
 
-    expect(result.language).toBe('kotlin')
+    expect(result.language).toBe(SyntaxHighlightLanguage.Kotlin)
     expect(result.label).toBe('React')
+  })
+
+  it('parses component field from comment', () => {
+    const fileContent = `// component=Button
+// url=https://figma.com/design/abc123?node-id=1:1
+const figma = require('figma')
+export default figma.code\`<Button />\``
+
+    fs.writeFileSync(tempFilePath, fileContent)
+    const result = parseRawFile(tempFilePath, undefined)
+
+    expect(result.component).toBe('Button')
+    expect(result.figmaNode).toBe('https://figma.com/design/abc123?node-id=1:1')
+  })
+
+  it('parses source field from comment', () => {
+    const fileContent = `// source=src/button.tsx
+// url=https://figma.com/design/abc123?node-id=1:1
+const figma = require('figma')
+export default figma.code\`<Button />\``
+
+    fs.writeFileSync(tempFilePath, fileContent)
+    const result = parseRawFile(tempFilePath, undefined)
+
+    expect(result.source).toBe('src/button.tsx')
+  })
+
+  it('parses fields in any order', () => {
+    const fileContent = `// url=https://figma.com/design/abc123?node-id=1:1
+// component=Button
+// source=src/button.tsx
+const figma = require('figma')
+export default figma.code\`<Button />\``
+
+    fs.writeFileSync(tempFilePath, fileContent)
+    const result = parseRawFile(tempFilePath, undefined)
+
+    expect(result.figmaNode).toBe('https://figma.com/design/abc123?node-id=1:1')
+    expect(result.component).toBe('Button')
+    expect(result.source).toBe('src/button.tsx')
+  })
+
+  it('handles missing optional fields', () => {
+    const fileContent = `// url=https://figma.com/design/abc123?node-id=1:1
+const figma = require('figma')
+export default figma.code\`<Button />\``
+
+    fs.writeFileSync(tempFilePath, fileContent)
+    const result = parseRawFile(tempFilePath, undefined)
+
+    expect(result.figmaNode).toBe('https://figma.com/design/abc123?node-id=1:1')
+    expect(result.component).toBeUndefined()
+  })
+
+  it('throws error when url field is missing', () => {
+    const fileContent = `// component=Button
+const figma = require('figma')
+export default figma.code\`<Button />\``
+
+    fs.writeFileSync(tempFilePath, fileContent)
+
+    expect(() => parseRawFile(tempFilePath, undefined)).toThrow('Missing required url field')
+  })
+
+  it('trims whitespace from field values', () => {
+    const fileContent = `// component=  Button
+// source=  src/button.tsx
+// url=  https://figma.com/design/abc123?node-id=1:1
+const figma = require('figma')
+export default figma.code\`<Button />\``
+
+    fs.writeFileSync(tempFilePath, fileContent)
+    const result = parseRawFile(tempFilePath, undefined)
+
+    expect(result.component).toBe('Button')
+    expect(result.source).toBe('src/button.tsx')
+    expect(result.figmaNode).toBe('https://figma.com/design/abc123?node-id=1:1')
   })
 })

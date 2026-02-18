@@ -33,4 +33,5 @@ export {
   connectType as connect,
   instanceType as instance,
   childrenType as children,
+  instanceType as slot,
 }

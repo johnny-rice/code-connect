@@ -2,6 +2,7 @@ import path from 'path'
 import * as connect from '../../../commands/connect'
 import { FigmaRestApi } from '../../figma_rest_api'
 import * as project from '../../project'
+import { SyntaxHighlightLanguage } from '../../label_language_mapping'
 import {
   convertRemoteFileUrlToRelativePath,
   createCodeConnectFiles,
@@ -127,7 +128,7 @@ describe('getUnconnectedComponentsAndConnectedComponentMappings', () => {
           {
             figmaNode: 'https://figma.com/design/someFileId/wow?node-id=1:11',
             label: 'React',
-            language: 'typescript',
+            language: SyntaxHighlightLanguage.TypeScript,
             component: 'Modal',
             source: 'https://github.com/some-user/my-design-system/blob/main/components/Modal.tsx',
             sourceLocation: { line: 2 },

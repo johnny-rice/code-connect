@@ -85,6 +85,9 @@ export function generateExpressionFromIntrinsic({ kind, args }: Intrinsic): stri
   if (kind === IntrinsicKind.Instance) {
     return `figma.instance("${args.figmaPropName}")`
   }
+  if (kind === IntrinsicKind.Slot) {
+    return `figma.slot("${args.figmaPropName}")`
+  }
   if (kind === IntrinsicKind.Children) {
     return `figma.children(${args.layers.length > 1 ? `[${args.layers.map((layer) => `"${layer}"`).join(', ')}]` : `"${args.layers[0]}"`})`
   }

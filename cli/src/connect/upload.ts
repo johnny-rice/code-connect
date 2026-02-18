@@ -88,11 +88,17 @@ export async function upload({
 }: Args) {
   const apiUrl = getApiUrl(docs?.[0]?.figmaNode ?? '', apiUrlOverride) + '/code_connect'
 
+  // Strip internal fields before uploading to Figma
+  const cleanedDocs = docs.map((doc) => {
+    const { _codeConnectFilePath, ...cleanDoc } = doc
+    return cleanDoc as CodeConnectJSON
+  })
+
   try {
     logger.info(`Uploading to Figma...`)
 
     // Create a map from fileKey-nodeId to original docs for detailed output
-    const docsMap = createDocsMap(docs, verbose)
+    const docsMap = createDocsMap(cleanedDocs, verbose)
 
     let allUploadedNodes = new Set<string>()
     let allFailedNodes = new Map<string, string>() // key -> failure reason
@@ -105,7 +111,7 @@ export async function upload({
 
       // batch together based on fileKey + nodeId as all variants etc of the same node should be uploaded together
       // Otherwise, the server will overwrite the previous upload
-      const groupedDocs = docs.reduce(
+      const groupedDocs = cleanedDocs.reduce(
         (acc, doc) => {
           const parsedData = parseFigmaNode(verbose, doc)
 
@@ -178,7 +184,7 @@ export async function upload({
       }
       process.stderr.write(`\n`)
     } else {
-      var size = Buffer.byteLength(JSON.stringify(docs)) / (1024 * 1024)
+      var size = Buffer.byteLength(JSON.stringify(cleanedDocs)) / (1024 * 1024)
 
       // Server has a limit of 5mb
       if (size > 5) {
@@ -192,7 +198,7 @@ export async function upload({
       logger.debug(`Uploading ${size.toFixed(2)}mb to Figma`)
       logger.info(`uploading to ${apiUrl}`)
 
-      const response = await request.post<UploadResponse>(apiUrl, docs, {
+      const response = await request.post<UploadResponse>(apiUrl, cleanedDocs, {
         headers: getHeaders(accessToken),
       })
 

@@ -6,7 +6,7 @@ import {
   mapImportPath,
   mapImportSpecifier,
 } from '../connect/project'
-import { CodeConnectLanguage } from '../connect/label_language_mapping'
+import { SyntaxHighlightLanguage } from '../connect/label_language_mapping'
 import { logger } from '../common/logging'
 import {
   bfsFindNode,
@@ -997,7 +997,7 @@ export async function parseReactDoc(
   return {
     figmaNode,
     label: DEFAULT_LABEL_PER_PARSER.react!,
-    language: CodeConnectLanguage.TypeScript,
+    language: SyntaxHighlightLanguage.TypeScript,
     component: metadata?.component,
     source: metadata?.source ? getRemoteFileUrl(metadata.source, repoUrl) : '',
     sourceLocation: metadata?.line !== undefined ? { line: metadata.line } : { line: -1 },

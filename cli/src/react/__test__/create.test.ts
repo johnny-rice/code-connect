@@ -611,6 +611,16 @@ describe('generateExpressionFromIntrinsic', () => {
     expect(result).toBe('figma.instance("Foo")')
   })
 
+  it('creates a slot expression', () => {
+    const result = generateExpressionFromIntrinsic({
+      kind: IntrinsicKind.Slot,
+      args: {
+        figmaPropName: 'Foo',
+      },
+    })
+    expect(result).toBe('figma.slot("Foo")')
+  })
+
   it('creates a children expression', () => {
     const result = generateExpressionFromIntrinsic({
       kind: IntrinsicKind.Children,

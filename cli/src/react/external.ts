@@ -7,6 +7,7 @@ import {
   classNameType,
   textContentType,
   instanceType,
+  slotType,
 } from '../connect/external_types'
 import { ReactMeta } from './types'
 
@@ -28,4 +29,5 @@ export {
   connectType as connect,
   instanceType as instance,
   childrenType as children,
+  slotType as slot,
 }

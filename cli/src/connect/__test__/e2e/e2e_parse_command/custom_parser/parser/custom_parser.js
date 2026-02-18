@@ -17,7 +17,7 @@ process.stdin.on('end', function () {
       }),
       source: path,
       templateData: { props: {} },
-      language: 'test',
+      language: 'plaintext',
       label: 'Test',
     })),
     messages: [

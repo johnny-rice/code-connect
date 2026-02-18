@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { ComponentTypeSignature } from '../react/parser'
 import { BaseCodeConnectObject } from './figma_connect'
 import { Intrinsic } from './intrinsics'
+import { SyntaxHighlightLanguage } from './label_language_mapping'
 
 export type ParseRequestPayload = {
   mode: 'PARSE'
@@ -75,6 +76,9 @@ export const ParseResponsePayload = z.object({
           line: z.number(),
         })
         .optional(),
+      // INTERNAL ONLY: Path to the Code Connect file itself, used for parserless migration
+      // Should be stripped out before publishing
+      _codeConnectFilePath: z.string().optional(),
       // The JS template function to use for this doc
       template: z.string(),
       templateData: z.object({
@@ -104,7 +108,7 @@ export const ParseResponsePayload = z.object({
         nestable: z.boolean().optional(),
       }),
       // The language to use for syntax highlighting
-      language: z.string(),
+      language: z.nativeEnum(SyntaxHighlightLanguage),
       // Label to be used for the example in the UI
       label: z.string(),
       // Optional array of links to be displayed in the UI.

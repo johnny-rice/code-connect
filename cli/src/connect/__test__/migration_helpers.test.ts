@@ -1,4 +1,16 @@
-import { migrateV1TemplateToV2, migrateTemplateToUseServerSideHelpers } from '../migration_helpers'
+import {
+  migrateV1TemplateToV2,
+  migrateTemplateToUseServerSideHelpers,
+  addImports,
+  addNestableToMetadata,
+  writeTemplateFile,
+  removePropsDefinitionAndMetadata,
+} from '../migration_helpers'
+import { CodeConnectJSON } from '../figma_connect'
+import { SyntaxHighlightLanguage } from '../label_language_mapping'
+import * as fs from 'fs'
+import * as path from 'path'
+import * as os from 'os'
 
 describe('migrateV1TemplateToV2', () => {
   describe('Core object rename', () => {
@@ -16,6 +28,15 @@ const prop2 = figma.currentLayer.__properties__.boolean('Bool')`
       const expected = `const prop1 = figma.selectedInstance.getString('Text')
 const prop2 = figma.selectedInstance.getBoolean('Bool')`
       expect(migrateV1TemplateToV2(input)).toBe(expected)
+    })
+  })
+
+  describe('Template type normalization', () => {
+    it('should normalize figma template helpers to figma.code', () => {
+      const input = `export default figma.html\`<div>Hello</div>\``
+      const result = migrateV1TemplateToV2(input)
+      expect(result).toContain('figma.code')
+      expect(result).not.toContain('figma.html')
     })
   })
 
@@ -71,6 +92,22 @@ const inst = figma.selectedInstance.getInstanceSwap('Icon')`
     })
   })
 
+  describe('Properties alias', () => {
+    it('should migrate figma.selectedInstance.__properties__ to figma.properties', () => {
+      const input = `const children = figma.selectedInstance.__properties__.children(["Button"])`
+      const expected = `const children = figma.properties.children(["Button"])`
+      expect(migrateV1TemplateToV2(input)).toBe(expected)
+    })
+
+    it('should handle multiple __properties__ calls', () => {
+      const input = `const children = figma.selectedInstance.__properties__.children(["Button"])
+const other = figma.selectedInstance.__properties__.something()`
+      const expected = `const children = figma.properties.children(["Button"])
+const other = figma.properties.something()`
+      expect(migrateV1TemplateToV2(input)).toBe(expected)
+    })
+  })
+
   describe('Other method renames', () => {
     it('should migrate __getPropertyValue__() to getPropertyValue()', () => {
       const input = `const value = figma.currentLayer.__getPropertyValue__('PropName')`
@@ -88,25 +125,25 @@ const inst = figma.selectedInstance.getInstanceSwap('Icon')`
 
     it('should wrap simple figma.tsx export in V2 format', () => {
       const input = `export default figma.tsx\`<Component />\``
-      const expected = `export default { example: figma.tsx\`<Component />\` }`
+      const expected = `export default { example: figma.code\`<Component />\` }`
       expect(migrateV1TemplateToV2(input)).toBe(expected)
     })
 
     it('should wrap simple figma.html export in V2 format', () => {
       const input = `export default figma.html\`<div></div>\``
-      const expected = `export default { example: figma.html\`<div></div>\` }`
+      const expected = `export default { example: figma.code\`<div></div>\` }`
       expect(migrateV1TemplateToV2(input)).toBe(expected)
     })
 
     it('should wrap simple figma.swift export in V2 format', () => {
       const input = `export default figma.swift\`Button()\``
-      const expected = `export default { example: figma.swift\`Button()\` }`
+      const expected = `export default { example: figma.code\`Button()\` }`
       expect(migrateV1TemplateToV2(input)).toBe(expected)
     })
 
     it('should wrap simple figma.kotlin export in V2 format', () => {
       const input = `export default figma.kotlin\`Button()\``
-      const expected = `export default { example: figma.kotlin\`Button()\` }`
+      const expected = `export default { example: figma.code\`Button()\` }`
       expect(migrateV1TemplateToV2(input)).toBe(expected)
     })
 
@@ -114,7 +151,7 @@ const inst = figma.selectedInstance.getInstanceSwap('Icon')`
       const input = `export default figma.tsx\`<Button>
   \${label}
 </Button>\``
-      const expected = `export default { example: figma.tsx\`<Button>
+      const expected = `export default { example: figma.code\`<Button>
   \${label}
 </Button>\` }`
       expect(migrateV1TemplateToV2(input)).toBe(expected)
@@ -124,7 +161,7 @@ const inst = figma.selectedInstance.getInstanceSwap('Icon')`
   describe('Export format - spread operator case', () => {
     it('should migrate spread operator export format', () => {
       const input = `export default { ...figma.tsx\`<Component />\`, metadata: { __props } }`
-      const expected = `export default { example: figma.tsx\`<Component />\`, metadata: { __props } }`
+      const expected = `export default { example: figma.code\`<Component />\`, metadata: { __props } }`
       expect(migrateV1TemplateToV2(input)).toBe(expected)
     })
 
@@ -136,7 +173,7 @@ const inst = figma.selectedInstance.getInstanceSwap('Icon')`
 
     it('should handle spread operator with whitespace variations', () => {
       const input = `export default {  ...figma.tsx\`<Component />\`, metadata: { __props } }`
-      const expected = `export default { example: figma.tsx\`<Component />\`, metadata: { __props } }`
+      const expected = `export default { example: figma.code\`<Component />\`, metadata: { __props } }`
       expect(migrateV1TemplateToV2(input)).toBe(expected)
     })
   })
@@ -183,7 +220,7 @@ if (label && label.type !== 'ERROR') {
   __props["label"] = label
 }
 
-export default { example: figma.tsx\`<Button\${_fcc_renderReactProp('variant', variant)}\${_fcc_renderReactProp('disabled', disabled)}>
+export default { example: figma.code\`<Button\${_fcc_renderReactProp('variant', variant)}\${_fcc_renderReactProp('disabled', disabled)}>
   \${_fcc_renderReactChildren(label)}
 </Button>\`, metadata: { __props } }`
 
@@ -349,29 +386,29 @@ return nestedLayer0.type === "ERROR" ? nestedLayer0 : {
   })
 
   describe('Instance property accessor', () => {
-    it('should migrate __properties__.instance() to getInstanceSwap().executeTemplate().example', () => {
+    it('should migrate __properties__.instance() to getInstanceSwap()?.executeTemplate().example', () => {
       const input = `const icon = figma.selectedInstance.__properties__.instance('Icon')`
-      const expected = `const icon = figma.selectedInstance.getInstanceSwap('Icon').executeTemplate().example`
+      const expected = `const icon = figma.selectedInstance.getInstanceSwap('Icon')?.executeTemplate().example`
       expect(migrateV1TemplateToV2(input)).toBe(expected)
     })
 
     it('should handle __properties__.instance() with double quotes', () => {
       const input = `const icon = figma.selectedInstance.__properties__.instance("Icon")`
-      const expected = `const icon = figma.selectedInstance.getInstanceSwap("Icon").executeTemplate().example`
+      const expected = `const icon = figma.selectedInstance.getInstanceSwap("Icon")?.executeTemplate().example`
       expect(migrateV1TemplateToV2(input)).toBe(expected)
     })
 
     it('should handle multiple __properties__.instance() calls', () => {
       const input = `const icon1 = figma.selectedInstance.__properties__.instance('Icon1')
 const icon2 = figma.selectedInstance.__properties__.instance('Icon2')`
-      const expected = `const icon1 = figma.selectedInstance.getInstanceSwap('Icon1').executeTemplate().example
-const icon2 = figma.selectedInstance.getInstanceSwap('Icon2').executeTemplate().example`
+      const expected = `const icon1 = figma.selectedInstance.getInstanceSwap('Icon1')?.executeTemplate().example
+const icon2 = figma.selectedInstance.getInstanceSwap('Icon2')?.executeTemplate().example`
       expect(migrateV1TemplateToV2(input)).toBe(expected)
     })
 
     it('should handle __properties__.instance() in template literals', () => {
       const input = `export default { example: figma.code\`<Component icon=\${figma.selectedInstance.__properties__.instance('Icon')} />\` }`
-      const expected = `export default { example: figma.code\`<Component icon=\${figma.selectedInstance.getInstanceSwap('Icon').executeTemplate().example} />\` }`
+      const expected = `export default { example: figma.code\`<Component icon=\${figma.selectedInstance.getInstanceSwap('Icon')?.executeTemplate().example} />\` }`
       expect(migrateV1TemplateToV2(input)).toBe(expected)
     })
 
@@ -384,12 +421,12 @@ const icon2 = figma.selectedInstance.getInstanceSwap('Icon2').executeTemplate().
   })
 
   describe('Patterns intentionally NOT migrated', () => {
-    it('should leave __properties__.children() as-is (still supported)', () => {
+    it('should migrate __properties__.children() to figma.properties alias', () => {
       const input = `const children = figma.currentLayer.__properties__.children(['Child1', 'Child2'])`
       const result = migrateV1TemplateToV2(input)
-      // Should migrate currentLayer but leave .children() alone
-      expect(result).toContain('figma.selectedInstance')
-      expect(result).toContain('.__properties__.children(')
+      // Should migrate currentLayer and also use figma.properties alias
+      const expected = `const children = figma.properties.children(['Child1', 'Child2'])`
+      expect(result).toBe(expected)
     })
 
     it('should leave __renderWithFn__() as-is (complex transformation)', () => {
@@ -451,7 +488,7 @@ export default figma.tsx\`<Button>\${_fcc_renderReactChildren(label)}</Button>\`
 
       expect(afterV2).toContain('figma.selectedInstance.getString')
       expect(afterV2).toContain('figma.helpers.react.renderChildren')
-      expect(afterV2).toContain('export default { example: figma.tsx')
+      expect(afterV2).toContain('export default { example: figma.code')
     })
 
     it('should work correctly in reverse order (V2 then helpers)', () => {
@@ -466,7 +503,251 @@ export default figma.tsx\`<Button>\${_fcc_renderReactChildren(label)}</Button>\`
 
       expect(afterHelpers).toContain('figma.selectedInstance.getString')
       expect(afterHelpers).toContain('figma.helpers.react.renderChildren')
-      expect(afterHelpers).toContain('export default { example: figma.tsx')
+      expect(afterHelpers).toContain('export default { example: figma.code')
     })
+  })
+})
+
+describe('addImports', () => {
+  it('should add imports after id field when id is present', () => {
+    const input = `export default { id: 'my-component', example: figma.code\`<Component />\` }`
+    const imports = ['import { Button } from "./ui"', 'import React from "react"']
+    const expected = `export default { id: 'my-component', imports: ["import { Button } from \\"./ui\\"","import React from \\"react\\""], example: figma.code\`<Component />\` }`
+    expect(addImports(input, imports)).toBe(expected)
+  })
+
+  it('should add imports at the start when no id field is present', () => {
+    const input = `export default { example: figma.code\`<Component />\` }`
+    const imports = ['import { Button } from "./ui"']
+    const expected = `export default { imports: ["import { Button } from \\"./ui\\""], example: figma.code\`<Component />\` }`
+    expect(addImports(input, imports)).toBe(expected)
+  })
+
+  it('should handle empty imports array by returning template unchanged', () => {
+    const input = `export default { id: 'my-component', example: figma.code\`<Component />\` }`
+    expect(addImports(input, [])).toBe(input)
+  })
+
+  it('should handle undefined imports by returning template unchanged', () => {
+    const input = `export default { id: 'my-component', example: figma.code\`<Component />\` }`
+    expect(addImports(input, undefined)).toBe(input)
+  })
+
+  it('should handle single import', () => {
+    const input = `export default { id: 'my-component', example: figma.code\`<Component />\` }`
+    const imports = ['import { Button } from "./ui"']
+    const expected = `export default { id: 'my-component', imports: ["import { Button } from \\"./ui\\""], example: figma.code\`<Component />\` }`
+    expect(addImports(input, imports)).toBe(expected)
+  })
+
+  it('should properly escape special characters in imports', () => {
+    const input = `export default { id: 'my-component', example: figma.code\`<Component />\` }`
+    const imports = ['import { Button } from "./ui/components"']
+    const expected = `export default { id: 'my-component', imports: ["import { Button } from \\"./ui/components\\""], example: figma.code\`<Component />\` }`
+    expect(addImports(input, imports)).toBe(expected)
+  })
+
+  it('should handle multiline templates', () => {
+    const input = `export default {
+  id: 'my-component',
+  example: figma.code\`<Component />\`
+}`
+    const imports = ['import { Button } from "./ui"']
+    // The regex will add imports after id on the same line
+    const result = addImports(input, imports)
+    expect(result).toContain(
+      'id: \'my-component\', imports: ["import { Button } from \\"./ui\\""],',
+    )
+    expect(result).toContain('export default {')
+    expect(result).toContain('example: figma.code')
+  })
+})
+
+describe('addNestableToMetadata', () => {
+  it('should add nestable to existing metadata object', () => {
+    const input = `export default { id: 'Button', example: figma.tsx\`<Button />\`, metadata: { __props } }`
+    const expected = `export default { id: 'Button', example: figma.tsx\`<Button />\`, metadata: { nestable: true, __props } }`
+    expect(addNestableToMetadata(input, true)).toBe(expected)
+  })
+
+  it('should handle nestable: false', () => {
+    const input = `export default { id: 'Button', example: figma.tsx\`<Button />\`, metadata: { __props } }`
+    const expected = `export default { id: 'Button', example: figma.tsx\`<Button />\`, metadata: { nestable: false, __props } }`
+    expect(addNestableToMetadata(input, false)).toBe(expected)
+  })
+
+  it('should return template unchanged when no metadata object exists', () => {
+    const input = `export default { id: 'Button', example: figma.tsx\`<Button />\` }`
+    expect(addNestableToMetadata(input, false)).toBe(input)
+  })
+
+  it('should handle metadata with whitespace (normalizes to single space)', () => {
+    const input = `export default { id: 'Button', example: figma.tsx\`<Button />\`, metadata:  { __props } }`
+    const expected = `export default { id: 'Button', example: figma.tsx\`<Button />\`, metadata: { nestable: true, __props } }`
+    expect(addNestableToMetadata(input, true)).toBe(expected)
+  })
+})
+
+describe('removePropsDefinitionAndMetadata', () => {
+  it('should remove const __props definition, assignments, and __props from metadata', () => {
+    const input = `const figma = require('figma')
+const label = figma.selectedInstance.getString('Label')
+const disabled = figma.selectedInstance.getBoolean('Disabled')
+const __props = {}
+if (label && label.type !== 'ERROR') {
+  __props["label"] = label
+}
+if (disabled && disabled.type !== 'ERROR') {
+  __props["disabled"] = disabled
+}
+
+export default { example: figma.tsx\`<Button />\`, metadata: { __props } }`
+
+    const expected = `const figma = require('figma')
+const label = figma.selectedInstance.getString('Label')
+const disabled = figma.selectedInstance.getBoolean('Disabled')
+
+export default { example: figma.tsx\`<Button />\`, metadata: {} }`
+
+    expect(removePropsDefinitionAndMetadata(input)).toBe(expected)
+  })
+})
+
+describe('writeTemplateFile with imports', () => {
+  let tempDir: string
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-migrate-test-'))
+  })
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true })
+  })
+
+  it('should include imports in the default export when migrating', () => {
+    const doc: CodeConnectJSON = {
+      figmaNode: 'https://figma.com/file/abc?node-id=1:1',
+      component: 'Button',
+      template: `const figma = require('figma')
+const label = figma.currentLayer.__properties__.string('Label')
+
+export default figma.tsx\`<Button>\${label}</Button>\``,
+      templateData: {
+        imports: ['import { Button } from "./ui"', 'import React from "react"'],
+        nestable: true,
+      },
+      language: SyntaxHighlightLanguage.TypeScript,
+      label: 'react',
+      metadata: {
+        cliVersion: '1.0.0',
+      },
+    }
+
+    const { outputPath, skipped } = writeTemplateFile(doc, tempDir, tempDir)
+
+    expect(skipped).toBe(false)
+    expect(fs.existsSync(outputPath)).toBe(true)
+
+    const content = fs.readFileSync(outputPath, 'utf-8')
+
+    // Verify URL is present
+    expect(content).toContain('// url=https://figma.com/file/abc?node-id=1:1')
+
+    // Verify imports are in the default export (prettier formats with single quotes)
+    expect(content).toContain('imports: [')
+    expect(content).toContain('import { Button } from "./ui"')
+    expect(content).toContain('import React from "react"')
+
+    // Verify id is present (prettier formats with double quotes)
+    expect(content).toContain('id: "Button"')
+
+    // Verify example is present
+    expect(content).toContain('example: figma.code')
+
+    // Verify V2 migration happened
+    expect(content).toContain('figma.selectedInstance')
+    expect(content).not.toContain('figma.currentLayer')
+  })
+
+  it('should not add imports field when no imports exist', () => {
+    const doc: CodeConnectJSON = {
+      figmaNode: 'https://figma.com/file/abc?node-id=1:1',
+      component: 'Button',
+      template: `const figma = require('figma')
+
+export default figma.tsx\`<Button />\``,
+      templateData: {
+        nestable: true,
+      },
+      language: SyntaxHighlightLanguage.TypeScript,
+      label: 'react',
+      metadata: {
+        cliVersion: '1.0.0',
+      },
+    }
+
+    const { outputPath, skipped } = writeTemplateFile(doc, tempDir, tempDir)
+
+    expect(skipped).toBe(false)
+    const content = fs.readFileSync(outputPath, 'utf-8')
+
+    // Verify imports field is not present
+    expect(content).not.toContain('imports:')
+  })
+
+  it('should include component and source fields in comment header when present', () => {
+    const doc: CodeConnectJSON = {
+      figmaNode: 'https://figma.com/file/abc123?node-id=1:1',
+      component: 'Button',
+      source: 'src/components/button.tsx',
+      template: `export default { id: 'Button', example: figma.code\`<Button />\` }`,
+      templateData: {
+        nestable: true,
+        isParserless: true,
+      },
+      language: SyntaxHighlightLanguage.TypeScript,
+      label: 'React',
+      sourceLocation: { line: -1 },
+      metadata: {
+        cliVersion: '1.0.0',
+      },
+    }
+
+    const { outputPath, skipped } = writeTemplateFile(doc, tempDir, tempDir)
+
+    expect(skipped).toBe(false)
+    const content = fs.readFileSync(outputPath, 'utf-8')
+
+    // Verify comment fields are written
+    expect(content).toContain('// url=https://figma.com/file/abc123?node-id=1:1')
+    expect(content).toContain('// source=src/components/button.tsx')
+    expect(content).toContain('// component=Button')
+  })
+
+  it('should only include url field when component and source are not present', () => {
+    const doc: CodeConnectJSON = {
+      figmaNode: 'https://figma.com/file/abc123?node-id=1:1',
+      template: `export default { id: 'Button', example: figma.code\`<Button />\` }`,
+      templateData: {
+        nestable: true,
+        isParserless: true,
+      },
+      language: SyntaxHighlightLanguage.TypeScript,
+      label: 'React',
+      sourceLocation: { line: -1 },
+      metadata: {
+        cliVersion: '1.0.0',
+      },
+    }
+
+    const { outputPath, skipped } = writeTemplateFile(doc, tempDir, tempDir)
+
+    expect(skipped).toBe(false)
+    const content = fs.readFileSync(outputPath, 'utf-8')
+
+    // Verify only url field is present
+    expect(content).not.toContain('// component=')
+    expect(content).not.toContain('// source=')
+    expect(content).toContain('// url=https://figma.com/file/abc123?node-id=1:1')
   })
 })

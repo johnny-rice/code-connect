@@ -96,6 +96,20 @@ export interface FigmaConnectAPI<InstanceChildrenT, ChildrenT> {
   instance<T = InstanceChildrenT>(figmaPropName: string): T
 
   /**
+   * Maps a Figma instance property for the connected slot layer. This prop is replaced
+   * with values from the Figma slot layer when viewed in Dev Mode. For example:
+   * ```ts
+   * props: {
+   *  Menu: figma.slot('Menu'),
+   * }
+   * ```
+   * Would show the "Menu" slot layer connected as an instance property in Figma.
+   *
+   * @param figmaPropName The name of the property on the Figma component
+   */
+  slot<T = InstanceChildrenT>(figmaPropName: string): T
+
+  /**
    * Maps a Figma instance layer to a nested code example. For example:
    * ```ts
    * props: {

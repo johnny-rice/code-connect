@@ -7,6 +7,7 @@
 declare const figma: { tsx: (template: TemplateStringsArray, ...args: any[]) => string }
 declare type CodeSection = { type: 'CODE'; code: string }
 declare type InstanceSection = { type: 'INSTANCE' }
+declare type SlotSection = { type: 'SLOT' }
 declare type ErrorSection = { type: 'ERROR' }
 
 // This file contains helper functions which hare included in the React template
@@ -89,19 +90,25 @@ export function _fcc_reactComponent($value: string) {
 }
 
 function isReactComponentArray(
-  prop: FCCValue | (CodeSection | InstanceSection | ErrorSection)[],
-): prop is (InstanceSection | CodeSection | ErrorSection)[] {
+  prop: FCCValue | (CodeSection | InstanceSection | SlotSection | ErrorSection)[],
+): prop is (InstanceSection | SlotSection | CodeSection | ErrorSection)[] {
   return (
     Array.isArray(prop) &&
-    prop.every((item) => item.type === 'INSTANCE' || item.type === 'CODE' || item.type === 'ERROR')
+    prop.every(
+      (item) =>
+        item.type === 'INSTANCE' ||
+        item.type === 'SLOT' ||
+        item.type === 'CODE' ||
+        item.type === 'ERROR',
+    )
   )
 }
 
 // Render a prop value passed to an object literal based on its type.
 // for example: <Button sx={{ key: value }} />
 function _fcc_renderPropValue(
-  prop: FCCValue | (CodeSection | InstanceSection)[],
-): string | number | boolean | (CodeSection | InstanceSection)[] {
+  prop: FCCValue | (CodeSection | InstanceSection | SlotSection)[],
+): string | number | boolean | (CodeSection | InstanceSection | SlotSection)[] {
   if (isReactComponentArray(prop)) {
     return prop
   }
@@ -153,7 +160,7 @@ function _fcc_renderPropValue(
 // Render a React prop correctly, based on its type
 function _fcc_renderReactProp(
   name: string,
-  prop: FCCValue | (CodeSection | InstanceSection | ErrorSection)[],
+  prop: FCCValue | (CodeSection | InstanceSection | SlotSection | ErrorSection)[],
 ) {
   // If the value is an array, then it's an array of objects representing React
   // children (either of type INSTANCE for pills, or CODE for inline code). The
@@ -220,7 +227,9 @@ function _fcc_renderReactProp(
 }
 
 // Renders React children correctly, based on their type
-function _fcc_renderReactChildren(prop: FCCValue | (CodeSection | InstanceSection)[]) {
+function _fcc_renderReactChildren(
+  prop: FCCValue | (CodeSection | InstanceSection | SlotSection)[],
+) {
   if (isReactComponentArray(prop)) {
     return prop
   }

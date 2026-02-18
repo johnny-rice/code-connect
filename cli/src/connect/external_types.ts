@@ -37,3 +37,7 @@ export function textContentType(_layer: string) {
 export function instanceType<T = ConnectedComponent>(_figmaPropName: string): T {
   return undefined as T
 }
+
+export function slotType<T = ConnectedComponent>(_figmaPropName: string): T {
+  return undefined as T
+}

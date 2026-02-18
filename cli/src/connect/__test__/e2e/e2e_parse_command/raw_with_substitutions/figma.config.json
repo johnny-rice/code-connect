@@ -5,6 +5,7 @@
     "paths": {},
     "include": [
       "*.{tsx, jsx}",
+      "*.figma.js",
       "*.figma.template.js"
     ],
     "exclude": [],

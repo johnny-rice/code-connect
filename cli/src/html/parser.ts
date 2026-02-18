@@ -21,7 +21,7 @@ import {
   ParseOptions,
 } from '../connect/parser_common'
 import { CodeConnectParser, DEFAULT_LABEL_PER_PARSER } from '../connect/project'
-import { CodeConnectLanguage } from '../connect/label_language_mapping'
+import { SyntaxHighlightLanguage } from '../connect/label_language_mapping'
 import { format } from 'prettier'
 
 function getHtmlTaggedTemplateNode(node: ts.Node): ts.TaggedTemplateExpression | undefined {
@@ -617,7 +617,7 @@ export async function parseHtmlDoc(
   return {
     figmaNode,
     label: DEFAULT_LABEL_PER_PARSER.html!,
-    language: CodeConnectLanguage.HTML,
+    language: SyntaxHighlightLanguage.HTML,
     component: metadata?.component,
     source: '',
     sourceLocation: { line: -1 },

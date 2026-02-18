@@ -9,7 +9,7 @@ import readline from 'readline'
 // We use an old version of this dep as I couldn't get ES modules working
 import findUp from 'find-up'
 import { exitWithFeedbackMessage } from './helpers'
-import { CodeConnectLabel, CodeConnectLanguage } from './label_language_mapping'
+import { CodeConnectLabel, SyntaxHighlightLanguage } from './label_language_mapping'
 
 const DEFAULT_CONFIG_FILE_NAME = 'figma.config.json'
 const ENV_FILE_NAME = '.env'
@@ -68,10 +68,9 @@ export type BaseCodeConnectConfig = {
 
   /**
    * Language to use for syntax highlighting in the uploaded code examples.
-   * Valid values: 'typescript', 'swift', 'kotlin', 'html', 'raw'
    * If not specified, language is inferred from the label or parser type.
    */
-  language?: string
+  language?: SyntaxHighlightLanguage
 
   /**
    * The URL of the Figma file to use during the interactive setup wizard for connecting code components to Figma components.
@@ -128,6 +127,8 @@ export type CodeConnectReactConfig = BaseCodeConnectConfig & {
 }
 
 export type CodeConnectHtmlConfig = BaseCodeConnectConfig & {}
+
+export type CodeConnectParserlessConfig = Omit<BaseCodeConnectConfig, 'parser'>
 
 export type CodeConnectConfig =
   | CodeConnectReactConfig
@@ -756,11 +757,11 @@ export async function getProjectInfoFromConfig(
  *
  * @param language The language string to validate
  */
-function validateLanguage(language: string | undefined): void {
+function validateLanguage(language: SyntaxHighlightLanguage | undefined): void {
   if (!language) return
 
-  const validLanguages = Object.values(CodeConnectLanguage)
-  if (!validLanguages.includes(language as CodeConnectLanguage)) {
+  const validLanguages = Object.values(SyntaxHighlightLanguage)
+  if (!validLanguages.includes(language)) {
     throw new Error(
       `Invalid language "${language}" in figma.config.json. ` +
         `Valid values are: ${validLanguages.join(', ')}`,

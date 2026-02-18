@@ -8,41 +8,88 @@ export function writeTemplateFile(
   outputDir: string | undefined,
   baseDir: string,
   localSourcePath?: string,
+  filePathsCreated?: Set<string>,
+  removeProps?: boolean,
 ): { outputPath: string; skipped: boolean } {
-  const suffix = '.figma.template.js'
+  const suffix = '.figma.js'
 
-  // Determine output filename
-  let outputPath: string
+  // Determine base output filename
+  let baseOutputPath: string
 
   if (outputDir) {
     // Use specified output directory
     const filename = `${doc.component || 'template'}${suffix}`
-    outputPath = path.join(outputDir, filename)
+    baseOutputPath = path.join(outputDir, filename)
   } else if (localSourcePath) {
     // Use same directory as local source file
     const sourceDir = path.dirname(localSourcePath)
-    const sourceBasename = path.basename(localSourcePath, path.extname(localSourcePath))
+    let sourceBasename = path.basename(localSourcePath)
+
+    // If this is a Code Connect file, extract the base component name
+    // Handles patterns like: Button.figma.tsx, Button.figmadoc.tsx, Button.figma.template.js
+    // Should all become: Button.figma.js
+    const codeConnectPattern = /\.(figma|figmadoc)(\.[^.]+)+$/
+    if (codeConnectPattern.test(sourceBasename)) {
+      // Extract everything before the .figma/.figmadoc pattern
+      sourceBasename = sourceBasename.replace(codeConnectPattern, '')
+    } else {
+      // For regular component files, strip extension normally
+      sourceBasename = path.basename(localSourcePath, path.extname(localSourcePath))
+    }
+
     const filename = `${sourceBasename}${suffix}`
-    outputPath = path.join(sourceDir, filename)
+    baseOutputPath = path.join(sourceDir, filename)
   } else {
     // No source info, use current directory
     const filename = `${doc.component || 'template'}${suffix}`
-    outputPath = path.join(baseDir, filename)
+    baseOutputPath = path.join(baseDir, filename)
   }
 
-  // Check if file exists and skip (always skip existing files)
-  if (fs.existsSync(outputPath)) {
-    return { outputPath, skipped: true }
+  // Check if file already exists on disk (pre-existing file, not created in this run)
+  const existsOnDisk = fs.existsSync(baseOutputPath)
+  const createdInThisRun = filePathsCreated && filePathsCreated.has(baseOutputPath)
+
+  if (existsOnDisk && !createdInThisRun) {
+    // This file existed before the migration run, skip it
+    return { outputPath: baseOutputPath, skipped: true }
+  }
+
+  // Handle duplicate names (either created in this run or would conflict with an existing file)
+  let outputPath = baseOutputPath
+  if (createdInThisRun || existsOnDisk) {
+    // Find a unique name by appending _1, _2, etc. before the suffix
+    const dir = path.dirname(baseOutputPath)
+    const basename = path.basename(baseOutputPath)
+
+    // Remove the suffix to get the base name (works for any suffix like .figma.js or .figma.ts)
+    const baseNameWithoutSuffix = basename.endsWith(suffix)
+      ? basename.slice(0, -suffix.length)
+      : basename
+
+    let counter = 1
+    do {
+      outputPath = path.join(dir, `${baseNameWithoutSuffix}_${counter}${suffix}`)
+      counter++
+    } while ((filePathsCreated && filePathsCreated.has(outputPath)) || fs.existsSync(outputPath))
   }
 
   let template = doc.template
 
+  template = removeSwiftHelpers(template)
   // Helpers have not been injected - replace reference with server-side versions
   template = migrateTemplateToUseServerSideHelpers(template)
+  // Remove __props definition and from metadata (if flag is set)
+  if (removeProps) {
+    template = removePropsDefinitionAndMetadata(template)
+  }
   // V1 -> V2 codemods
   template = migrateV1TemplateToV2(template)
   // Add required id to template (set to TODO if no usable name)
   template = addId(template, doc.component || 'TODO')
+  // Add imports if present
+  template = addImports(template, doc.templateData?.imports)
+  // Add nestable to metadata (default to false)
+  template = addNestableToMetadata(template, !!doc.templateData?.nestable)
   // Format for ease of use
   template = prettier.format(template, {
     parser: 'typescript',
@@ -54,8 +101,18 @@ export function writeTemplateFile(
   })
 
   // Create the template file content
-  // Format: first line is the URL, rest is the template
-  const fileContent = `// url=${doc.figmaNode}\n${template}`
+
+  // Build comment header lines
+  const commentLines: string[] = [`// url=${doc.figmaNode}`] // URL is required
+  if (doc.source) {
+    commentLines.push(`// source=${doc.source}`)
+  }
+  if (doc.component) {
+    commentLines.push(`// component=${doc.component}`)
+  }
+  commentLines.push(``)
+
+  const fileContent = commentLines.join('\n') + '\n' + template
 
   // Ensure output directory exists
   const outputDirPath = path.dirname(outputPath)
@@ -65,6 +122,11 @@ export function writeTemplateFile(
 
   // Write the file
   fs.writeFileSync(outputPath, fileContent, 'utf-8')
+
+  // Track the created file path
+  if (filePathsCreated) {
+    filePathsCreated.add(outputPath)
+  }
 
   return { outputPath, skipped: false }
 }
@@ -97,13 +159,41 @@ export function addId(template: string, id: string): string {
   return template.replace(/export default \{/, `export default { id: '${id}',`)
 }
 
+export function addImports(template: string, imports: string[] | undefined): string {
+  if (!imports || imports.length === 0) {
+    return template
+  }
+
+  // Escape imports for safe insertion into JS
+  const importsJson = JSON.stringify(imports)
+
+  // Add imports after the id field if it exists, otherwise at the start
+  // Match: export default { id: '...', (with optional whitespace/newlines)
+  const withId = template.replace(
+    /(export default\s*\{\s*id:\s*'[^']*',)/,
+    `$1 imports: ${importsJson},`,
+  )
+
+  // If id replacement worked, return
+  if (withId !== template) {
+    return withId
+  }
+
+  // Otherwise, add at the start (after opening brace)
+  return template.replace(/export default\s*\{/, `export default { imports: ${importsJson},`)
+}
+
+export function addNestableToMetadata(template: string, nestable: boolean): string {
+  // Find "metadata: {" and replace with "metadata: { nestable: <value>,"
+  return template.replace(/metadata:\s*\{/, `metadata: { nestable: ${nestable},`)
+}
+
 /**
  * Migrates V1 templates to V2 API.
  *
  * This performs safe, incremental transformations. The following patterns
  * are intentionally NOT migrated as they're still supported in V2:
  *
- * - .__properties__.children() - no direct V2 equivalent, still supported
  * - __props metadata building pattern - still valid JavaScript
  * - __renderWithFn__() - complex transformation, still supported
  *
@@ -115,7 +205,13 @@ export const migrateV1TemplateToV2 = (template: string): string => {
   // 1. Core object rename
   migrated = migrated.replace(/figma\.currentLayer/g, 'figma.selectedInstance')
 
-  // 2. Property accessor methods
+  // 2. Normalize template types to figma.code
+  migrated = migrated.replace(/figma\.html/g, 'figma.code')
+  migrated = migrated.replace(/figma\.tsx/g, 'figma.code')
+  migrated = migrated.replace(/figma\.swift/g, 'figma.code')
+  migrated = migrated.replace(/figma\.kotlin/g, 'figma.code')
+
+  // 3. Property accessor methods
   migrated = migrated.replace(/\.__properties__\.string\(/g, '.getString(')
   migrated = migrated.replace(/\.__properties__\.boolean\(/g, '.getBoolean(')
   migrated = migrated.replace(/\.__properties__\.enum\(/g, '.getEnum(')
@@ -123,13 +219,16 @@ export const migrateV1TemplateToV2 = (template: string): string => {
   // .__properties__.instance() auto-renders, so we need to add .executeTemplate().example
   migrated = migrated.replace(
     /\.__properties__\.instance\(([^)]+)\)/g,
-    '.getInstanceSwap($1).executeTemplate().example',
+    '.getInstanceSwap($1)?.executeTemplate().example',
   )
 
-  // 3. Other method renames
+  // 4. Alias for __properties__ on selectedInstance
+  migrated = migrated.replace(/figma\.selectedInstance\.__properties__\./g, 'figma.properties.')
+
+  // 5. Other method renames
   migrated = migrated.replace(/\.__getPropertyValue__\(/g, '.getPropertyValue(')
 
-  // 4. __findChildWithCriteria__ - migrate based on type parameter
+  // 6. __findChildWithCriteria__ - migrate based on type parameter
   // For TEXT type with __render__(): __findChildWithCriteria__({ name: 'X', type: "TEXT" }).__render__() → findText('X').textContent
   migrated = migrated.replace(
     /\.__findChildWithCriteria__\(\{\s*name:\s*'([^']+)',\s*type:\s*"TEXT"\s*\}\)\.__render__\(\)/g,
@@ -158,7 +257,7 @@ export const migrateV1TemplateToV2 = (template: string): string => {
     ".findText('$1')",
   )
 
-  // 5. __find__() - migrate to findInstance()
+  // 7. __find__() - migrate to findInstance()
   migrated = migrated.replace(
     /\.__find__\(("([^"]+)"|'([^']+)')\)/g,
     (match, quote, doubleQuoted, singleQuoted) => {
@@ -167,13 +266,13 @@ export const migrateV1TemplateToV2 = (template: string): string => {
     },
   )
 
-  // 6. __render__() - migrate to executeTemplate().example (but not if part of __findChildWithCriteria__)
+  // 8. __render__() - migrate to executeTemplate().example (but not if part of __findChildWithCriteria__)
   migrated = migrated.replace(/\.__render__\(\)/g, '.executeTemplate().example')
 
-  // 7. __getProps__() - migrate to executeTemplate().metadata.props
+  // 9. __getProps__() - migrate to executeTemplate().metadata.props
   migrated = migrated.replace(/\.__getProps__\(\)/g, '.executeTemplate().metadata.props')
 
-  // 8. Export format - simple case
+  // 10. Export format - simple case
   // Match export default figma.code` (or tsx, html, etc) and wrap in { example: ... }
   migrated = migrated.replace(
     /export default figma\.(code|tsx|html|swift|kotlin)`/g,
@@ -186,7 +285,7 @@ export const migrateV1TemplateToV2 = (template: string): string => {
     '$1` }',
   )
 
-  // 9. Export format - spread operator case
+  // 11. Export format - spread operator case
   // { ...figma.code`...`, metadata: ... } → { example: figma.code`...`, metadata: ... }
   migrated = migrated.replace(
     /\{\s*\.\.\.figma\.(code|tsx|html|swift|kotlin)`/g,
@@ -194,4 +293,99 @@ export const migrateV1TemplateToV2 = (template: string): string => {
   )
 
   return migrated
+}
+
+/**
+ * Removes the __props definition and props assignments. These are only used by icons
+ * helpers and significantly bloat templates.
+ */
+export function removePropsDefinition(template: string): string {
+  // Match from "const __props = {" through everything up until (but not including) "export default {"
+  // Uses [\s\S] to match any character including newlines
+  return template.replace(/const\s+__props\s*=\s*\{[\s\S]*?(?=export\s+default\s*\{)/g, '\n')
+}
+
+/**
+ * Removes the __props definition/assignments and removes __props from the default export
+ */
+export function removePropsDefinitionAndMetadata(template: string): string {
+  // First remove the __props definition and assignments
+  let result = removePropsDefinition(template)
+  const exportMatch = result.match(/(export\s+default\s+\{[\s\S]*$)/)
+  if (exportMatch) {
+    const exportSection = exportMatch[1]
+    const cleanedExport = exportSection
+      .replace(/metadata:\s*\{\s*__props\s*\}/g, 'metadata: {}') // metadata: { __props }
+      .replace(/metadata:\s*\{\s*__props\s*,/g, 'metadata: {') // metadata: { __props, ...
+      .replace(/,\s*__props\s*\}/g, ' }') // metadata: { ..., __props }
+      .replace(/,\s*__props\s*,/g, ',') // metadata: { ..., __props, ... }
+
+    result = result.substring(0, result.indexOf(exportSection)) + cleanedExport
+  }
+
+  return result
+}
+
+type CodeConnectObjectsForFigmaUrl = {
+  main: CodeConnectJSON | null
+  variants: CodeConnectJSON[]
+}
+
+/**
+ * For each figmaUrl in the given codeConnectObjects, return the main (non-variant)
+ * codeConnectObject plus a list of any variants
+ */
+export const groupCodeConnectObjectsByFigmaUrl = (codeConnectObjects: CodeConnectJSON[]) => {
+  return codeConnectObjects.reduce(
+    (acc, obj) => {
+      const figmaUrl = obj.figmaNode
+      if (!acc[figmaUrl]) {
+        acc[figmaUrl] = { main: null, variants: [] }
+      }
+
+      if (obj.variant && Object.keys(obj.variant).length > 0) {
+        acc[figmaUrl].variants.push(obj)
+      } else {
+        acc[figmaUrl].main = obj
+      }
+
+      return acc
+    },
+    {} as Record<string, CodeConnectObjectsForFigmaUrl>,
+  )
+}
+
+function removeSwiftHelpers(template: string): string {
+  return template.replace(
+    `function __fcc_renderSwiftChildren(children, prefix) {
+  if (children === undefined) {
+    return children
+  }
+  return children.flatMap((child, index) => {
+    if (child.type === 'CODE') {
+      let code = child.code.split('\\n').map((line) => {
+        return line.trim() !== '' ? \`\${prefix}\${line}\` : line;
+      }).join('\\n')
+      if (index !== children.length - 1) {
+        code = code + '\\n'
+      }
+      return {
+        ...child,
+        code: code,
+      }
+    } else {
+        let elements = []
+        const shouldAddNewline = index > 0 && children[index - 1].type === 'CODE' && !children[index - 1].code.endsWith('\\n')
+        elements.push({ type: 'CODE', code: \`\${shouldAddNewline ? '\\n' : ''}\${prefix}\` })
+        elements.push(child)
+        if (index !== children.length - 1) {
+            elements.push({ type: 'CODE', code: '\\n' })
+        }
+        return elements
+    }
+  })
+}
+`,
+    '',
+  )
 }
