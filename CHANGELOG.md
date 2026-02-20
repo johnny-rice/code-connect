@@ -1,3 +1,9 @@
+# Code Connect v1.4.1 (20th February 2026)
+
+## Fixed
+
+- Fixed issue with publishing template files without a `source` value
+
 # Code Connect v1.4.0 (18th February 2026)
 
 ## Features

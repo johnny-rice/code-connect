@@ -274,7 +274,7 @@ export function parseRawFile(
     templateData: { nestable: true, isParserless: true },
     language,
     label: effectiveLabel,
-    source: fields.source,
+    source: fields.source || '',
     sourceLocation: { line: -1 },
     metadata: {
       cliVersion: require('../../package.json').version,
