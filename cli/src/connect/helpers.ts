@@ -103,6 +103,26 @@ export function normalizePropName(name: string) {
 }
 
 /**
+ * Applies documentUrlSubstitutions to a value. Processes longer keys first so that
+ * when one key is a prefix of another (e.g. "Input" and "InputMenu"),
+ * the longer match wins and avoids corrupting the result.
+ */
+export function applyDocumentUrlSubstitutions(
+  value: string,
+  substitutions: Record<string, string>,
+): string {
+  const entries = Object.entries(substitutions)
+  if (entries.length === 0) return value
+  // Sort by key length descending so "InputMenu" is applied before "Input"
+  const sorted = [...entries].sort(([a], [b]) => b.length - a.length)
+  let result = value
+  for (const [from, to] of sorted) {
+    result = result.replace(from, to)
+  }
+  return result
+}
+
+/**
  * Displays a feedback/bugs issues link before exiting
  */
 export function exitWithFeedbackMessage(exitCode: number): never {

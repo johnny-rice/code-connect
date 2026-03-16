@@ -20,6 +20,7 @@ import {
   parseImports,
   ParseOptions,
 } from '../connect/parser_common'
+import { applyDocumentUrlSubstitutions } from '../connect/helpers'
 import { CodeConnectParser, DEFAULT_LABEL_PER_PARSER } from '../connect/project'
 import { SyntaxHighlightLanguage } from '../connect/label_language_mapping'
 import { format } from 'prettier'
@@ -587,10 +588,7 @@ export async function parseHtmlDoc(
   let figmaNode = stripQuotesFromNode(figmaNodeUrlArg)
   // TODO This logic is duplicated in connect.ts transformDocFromParser due to some type issues
   if (config.documentUrlSubstitutions) {
-    Object.entries(config.documentUrlSubstitutions).forEach(([from, to]) => {
-      // @ts-expect-error
-      figmaNode = figmaNode.replace(from, to)
-    })
+    figmaNode = applyDocumentUrlSubstitutions(figmaNode as string, config.documentUrlSubstitutions)
   }
 
   const metadata: any = undefined

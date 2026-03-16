@@ -5,6 +5,9 @@ import {
   addNestableToMetadata,
   writeTemplateFile,
   removePropsDefinitionAndMetadata,
+  prepareMigratedTemplate,
+  groupCodeConnectObjectsByFigmaUrl,
+  writeVariantTemplateFile,
 } from '../migration_helpers'
 import { CodeConnectJSON } from '../figma_connect'
 import { SyntaxHighlightLanguage } from '../label_language_mapping'
@@ -624,6 +627,46 @@ describe('writeTemplateFile with imports', () => {
     fs.rmSync(tempDir, { recursive: true, force: true })
   })
 
+  it('should output a .figma.ts file by default', () => {
+    const doc: CodeConnectJSON = {
+      figmaNode: 'https://figma.com/file/abc?node-id=1:1',
+      component: 'Button',
+      template: `const figma = require('figma')
+export default figma.tsx\`<Button />\``,
+      templateData: { nestable: true },
+      language: SyntaxHighlightLanguage.TypeScript,
+      label: 'react',
+      metadata: { cliVersion: '1.0.0' },
+    }
+
+    const { outputPath } = writeTemplateFile(doc, tempDir, tempDir)
+    expect(outputPath).toMatch(/\.figma\.ts$/)
+  })
+
+  it('should output a .figma.js file when useTypeScript is false', () => {
+    const doc: CodeConnectJSON = {
+      figmaNode: 'https://figma.com/file/abc?node-id=1:1',
+      component: 'Button',
+      template: `const figma = require('figma')
+export default figma.tsx\`<Button />\``,
+      templateData: { nestable: true },
+      language: SyntaxHighlightLanguage.TypeScript,
+      label: 'react',
+      metadata: { cliVersion: '1.0.0' },
+    }
+
+    const { outputPath } = writeTemplateFile(
+      doc,
+      tempDir,
+      tempDir,
+      undefined,
+      undefined,
+      false,
+      false,
+    )
+    expect(outputPath).toMatch(/\.figma\.js$/)
+  })
+
   it('should include imports in the default export when migrating', () => {
     const doc: CodeConnectJSON = {
       figmaNode: 'https://figma.com/file/abc?node-id=1:1',
@@ -647,6 +690,7 @@ export default figma.tsx\`<Button>\${label}</Button>\``,
 
     expect(skipped).toBe(false)
     expect(fs.existsSync(outputPath)).toBe(true)
+    expect(outputPath).toMatch(/\.figma\.ts$/)
 
     const content = fs.readFileSync(outputPath, 'utf-8')
 
@@ -749,5 +793,371 @@ export default figma.tsx\`<Button />\``,
     expect(content).not.toContain('// component=')
     expect(content).not.toContain('// source=')
     expect(content).toContain('// url=https://figma.com/file/abc123?node-id=1:1')
+  })
+})
+
+describe('prepareMigratedTemplate', () => {
+  it('applies migrations and returns template (no url)', () => {
+    const doc: CodeConnectJSON = {
+      figmaNode: 'https://figma.com/file/abc?node-id=1:1',
+      component: 'Button',
+      template: `const figma = require('figma')
+const label = figma.currentLayer.__properties__.string('Label')
+
+export default figma.tsx\`<Button>\${label}</Button>\``,
+      templateData: { nestable: true },
+      language: SyntaxHighlightLanguage.TypeScript,
+      label: 'react',
+      metadata: { cliVersion: '1.0.0' },
+    }
+    const result = prepareMigratedTemplate(doc)
+    expect(result).toContain('figma.selectedInstance.getString')
+    expect(result).toContain('example: figma.code')
+    expect(result).toContain('id:')
+    expect(result).toContain('Button')
+    expect(result).not.toContain('// url=')
+  })
+})
+
+describe('groupCodeConnectObjectsByFigmaUrl', () => {
+  it('groups main + variants by figmaUrl', () => {
+    const url = 'https://figma.com/file/abc?node-id=1:1'
+    const main: CodeConnectJSON = {
+      figmaNode: url,
+      component: 'Button',
+      template: 'export default { example: figma.tsx`<Button />` }',
+      templateData: {},
+      language: SyntaxHighlightLanguage.TypeScript,
+      label: 'react',
+      metadata: { cliVersion: '1.0.0' },
+    }
+    const variantPrimary: CodeConnectJSON = {
+      ...main,
+      variant: { Variant: 'Primary' },
+      template: 'export default { example: figma.tsx`<ButtonPrimary />` }',
+    }
+    const variantSecondary: CodeConnectJSON = {
+      ...main,
+      variant: { Variant: 'Secondary' },
+      template: 'export default { example: figma.tsx`<ButtonSecondary />` }',
+    }
+    const grouped = groupCodeConnectObjectsByFigmaUrl([main, variantPrimary, variantSecondary])
+    expect(Object.keys(grouped)).toEqual([url])
+    expect(grouped[url].main).toEqual(main)
+    expect(grouped[url].variants).toHaveLength(2)
+    expect(grouped[url].variants.map((v) => v.variant?.Variant)).toEqual(['Primary', 'Secondary'])
+  })
+})
+
+describe('writeVariantTemplateFile', () => {
+  let tempDir: string
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-variant-migrate-'))
+  })
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true })
+  })
+
+  it('outputs a .figma.ts file by default', () => {
+    const url = 'https://figma.com/file/abc?node-id=1:1'
+    const variant: CodeConnectJSON = {
+      figmaNode: url,
+      component: 'Button',
+      variant: { Variant: 'Primary' },
+      template: `const figma = require('figma')
+export default { example: figma.tsx\`<ButtonPrimary />\` }`,
+      templateData: {},
+      language: SyntaxHighlightLanguage.TypeScript,
+      label: 'react',
+      metadata: { cliVersion: '1.0.0' },
+    }
+    const group = { main: null, variants: [variant] }
+    const { outputPath } = writeVariantTemplateFile(
+      group,
+      url,
+      tempDir,
+      tempDir,
+      undefined,
+      new Set(),
+    )
+    expect(outputPath).toMatch(/\.figma\.ts$/)
+  })
+
+  it('outputs a .figma.js file when useTypeScript is false', () => {
+    const url = 'https://figma.com/file/abc?node-id=1:1'
+    const variant: CodeConnectJSON = {
+      figmaNode: url,
+      component: 'Button',
+      variant: { Variant: 'Primary' },
+      template: `const figma = require('figma')
+export default { example: figma.tsx\`<ButtonPrimary />\` }`,
+      templateData: {},
+      language: SyntaxHighlightLanguage.TypeScript,
+      label: 'react',
+      metadata: { cliVersion: '1.0.0' },
+    }
+    const group = { main: null, variants: [variant] }
+    const { outputPath } = writeVariantTemplateFile(
+      group,
+      url,
+      tempDir,
+      tempDir,
+      undefined,
+      new Set(),
+      false,
+    )
+    expect(outputPath).toMatch(/\.figma\.js$/)
+  })
+
+  it('writes one file with variant switch (main + variants)', () => {
+    const url = 'https://figma.com/file/abc?node-id=1:1'
+    const main: CodeConnectJSON = {
+      figmaNode: url,
+      component: 'Button',
+      template: `const figma = require('figma')
+export default { example: figma.tsx\`<Button>Default</Button>\` }`,
+      templateData: {},
+      language: SyntaxHighlightLanguage.TypeScript,
+      label: 'react',
+      metadata: { cliVersion: '1.0.0' },
+    }
+    const variantPrimary: CodeConnectJSON = {
+      ...main,
+      variant: { Variant: 'Primary' },
+      template: `const figma = require('figma')
+export default { example: figma.tsx\`<ButtonPrimary />\` }`,
+    }
+    const variantSecondary: CodeConnectJSON = {
+      ...main,
+      variant: { Variant: 'Secondary' },
+      template: `const figma = require('figma')
+export default { example: figma.tsx\`<ButtonSecondary />\` }`,
+    }
+    const group = {
+      main,
+      variants: [variantPrimary, variantSecondary],
+    }
+
+    const { outputPath, skipped } = writeVariantTemplateFile(
+      group,
+      url,
+      tempDir,
+      tempDir,
+      undefined,
+      new Set(),
+    )
+    expect(skipped).toBe(false)
+
+    const content = fs.readFileSync(outputPath, 'utf-8')
+
+    const expected = `// url=https://figma.com/file/abc?node-id=1:1
+// component=Button
+
+const figma = require("figma")
+
+// Branch per variant combination.
+
+let template
+if (figma.selectedInstance.getPropertyValue("Variant") === "Primary") {
+  template = { id: "Button", example: figma.code\`<ButtonPrimary />\` }
+} else if (figma.selectedInstance.getPropertyValue("Variant") === "Secondary") {
+  template = { id: "Button", example: figma.code\`<ButtonSecondary />\` }
+} else {
+  template = { id: "Button", example: figma.code\`<Button>Default</Button>\` }
+}
+
+export default template
+`
+    expect(content).toBe(expected)
+  })
+
+  it('variants-only: no default, else uses first', () => {
+    const url = 'https://figma.com/file/abc?node-id=2:2'
+    const variantPrimary: CodeConnectJSON = {
+      figmaNode: url,
+      component: 'Button',
+      variant: { Variant: 'Primary' },
+      template: `const figma = require('figma')
+export default { example: figma.tsx\`<ButtonPrimary />\` }`,
+      templateData: {},
+      language: SyntaxHighlightLanguage.TypeScript,
+      label: 'react',
+      metadata: { cliVersion: '1.0.0' },
+    }
+    const variantSecondary: CodeConnectJSON = {
+      ...variantPrimary,
+      variant: { Variant: 'Secondary' },
+      template: `const figma = require('figma')
+export default { example: figma.tsx\`<ButtonSecondary />\` }`,
+    }
+    const group = { main: null, variants: [variantPrimary, variantSecondary] }
+    const { outputPath, skipped } = writeVariantTemplateFile(
+      group,
+      url,
+      tempDir,
+      tempDir,
+      undefined,
+      new Set(),
+    )
+    expect(skipped).toBe(false)
+    const content = fs.readFileSync(outputPath, 'utf-8')
+    expect(content).toContain('no default')
+    expect(content).toContain('template = {')
+    expect(content).toContain('export default template')
+  })
+
+  it('each branch has its own props (label, disabled)', () => {
+    const url = 'https://figma.com/file/abc?node-id=3:3'
+    const main: CodeConnectJSON = {
+      figmaNode: url,
+      component: 'Button',
+      template: `const figma = require('figma')
+const label = figma.currentLayer.__properties__.string('Label')
+const disabled = figma.currentLayer.__properties__.boolean('Disabled')
+export default { example: figma.tsx\`<Button disabled={\${disabled}}>\${label}</Button>\` }`,
+      templateData: {},
+      language: SyntaxHighlightLanguage.TypeScript,
+      label: 'react',
+      metadata: { cliVersion: '1.0.0' },
+    }
+    const variantPrimary: CodeConnectJSON = {
+      ...main,
+      variant: { Variant: 'Primary' },
+      template: `const figma = require('figma')
+const label = figma.currentLayer.__properties__.string('Label')
+export default { example: figma.tsx\`<ButtonPrimary>\${label}</ButtonPrimary>\` }`,
+    }
+    const group = { main, variants: [variantPrimary] }
+
+    const { outputPath, skipped } = writeVariantTemplateFile(
+      group,
+      url,
+      tempDir,
+      tempDir,
+      undefined,
+      new Set(),
+    )
+    expect(skipped).toBe(false)
+
+    const content = fs.readFileSync(outputPath, 'utf-8')
+
+    // Each branch has its own property declarations (no deduplication)
+    // Check that both branches have label, and default has disabled too
+    expect(content).toMatch(
+      /if \(figma\.selectedInstance\.getPropertyValue\("Variant"\) === "Primary"\)[\s\S]*getString[\s\S]*\} else \{[\s\S]*getString[\s\S]*getBoolean/,
+    )
+  })
+
+  it('complex: main + Primary + Danger, each branch self-contained', () => {
+    const url = 'https://figma.com/file/xyz?node-id=4:4'
+    const main: CodeConnectJSON = {
+      figmaNode: url,
+      component: 'Button',
+      template: `const figma = require('figma')
+const label = figma.currentLayer.__properties__.string('Label')
+const disabled = figma.currentLayer.__properties__.boolean('Disabled')
+const size = figma.currentLayer.__properties__.enum('Size', { S: 'S', M: 'M', L: 'L' })
+export default { example: figma.tsx\`<Button size={\${size}} disabled={\${disabled}}>\${label}</Button>\` }`,
+      templateData: {},
+      language: SyntaxHighlightLanguage.TypeScript,
+      label: 'react',
+      metadata: { cliVersion: '1.0.0' },
+    }
+    const variantPrimary: CodeConnectJSON = {
+      ...main,
+      variant: { Variant: 'Primary' },
+      template: `const figma = require('figma')
+const label = figma.currentLayer.__properties__.string('Label')
+const size = figma.currentLayer.__properties__.enum('Size', { S: 'S', M: 'M', L: 'L' })
+export default { example: figma.tsx\`<ButtonPrimary size={\${size}}>\${label}</ButtonPrimary>\` }`,
+    }
+    const variantDanger: CodeConnectJSON = {
+      ...main,
+      variant: { Variant: 'Danger' },
+      template: `const figma = require('figma')
+const label = figma.currentLayer.__properties__.string('Label')
+const disabled = figma.currentLayer.__properties__.boolean('Disabled')
+export default { example: figma.tsx\`<ButtonDanger disabled={\${disabled}}>\${label}</ButtonDanger>\` }`,
+    }
+    const group = { main, variants: [variantPrimary, variantDanger] }
+
+    const { outputPath, skipped } = writeVariantTemplateFile(
+      group,
+      url,
+      tempDir,
+      tempDir,
+      undefined,
+      new Set(),
+    )
+    expect(skipped).toBe(false)
+
+    const content = fs.readFileSync(outputPath, 'utf-8')
+
+    // Check whole structure: branches using getPropertyValue
+    expect(content).toMatch(/let template/)
+    expect(content).toMatch(/figma\.selectedInstance\.getPropertyValue/)
+
+    // Check Primary branch has complete code (label, size declarations + template)
+    expect(content).toMatch(
+      /if \(figma\.selectedInstance\.getPropertyValue\("Variant"\) === "Primary"\) \{[^]*const label[^]*const size[^]*template = \{/,
+    )
+
+    // Check Danger branch has complete code (label, disabled declarations + template)
+    expect(content).toMatch(
+      /\} else if \(figma\.selectedInstance\.getPropertyValue\("Variant"\) === "Danger"\) \{[^]*const label[^]*const disabled[^]*template = \{/,
+    )
+
+    // Check default branch exists with its own code
+    expect(content).toMatch(/\} else \{[^]*template = \{[^]*\}[^]*export default template/)
+  })
+
+  it('handles multi-property variants (e.g., {disabled: true, type: "info"})', () => {
+    const url = 'https://figma.com/file/xyz?node-id=5:5'
+    const main: CodeConnectJSON = {
+      figmaNode: url,
+      component: 'Button',
+      template: `const figma = require('figma')
+export default { example: figma.tsx\`<Button>Default</Button>\` }`,
+      templateData: {},
+      language: SyntaxHighlightLanguage.TypeScript,
+      label: 'react',
+      metadata: { cliVersion: '1.0.0' },
+    }
+    const variantDisabledInfo: CodeConnectJSON = {
+      ...main,
+      variant: { disabled: true, type: 'info' },
+      template: `const figma = require('figma')
+export default { example: figma.tsx\`<Button disabled type="info">Info</Button>\` }`,
+    }
+    const variantEnabledWarning: CodeConnectJSON = {
+      ...main,
+      variant: { disabled: false, type: 'warning' },
+      template: `const figma = require('figma')
+export default { example: figma.tsx\`<Button type="warning">Warning</Button>\` }`,
+    }
+    const group = { main, variants: [variantDisabledInfo, variantEnabledWarning] }
+
+    const { outputPath, skipped } = writeVariantTemplateFile(
+      group,
+      url,
+      tempDir,
+      tempDir,
+      undefined,
+      new Set(),
+    )
+    expect(skipped).toBe(false)
+
+    const content = fs.readFileSync(outputPath, 'utf-8')
+
+    // Check that conditions use all properties with &&
+    expect(content).toMatch(
+      /if \([^)]*figma\.selectedInstance\.getPropertyValue\("disabled"\) === true[^)]*&&[^)]*figma\.selectedInstance\.getPropertyValue\("type"\) === "info"[^)]*\)/,
+    )
+    expect(content).toMatch(
+      /else if \([^)]*figma\.selectedInstance\.getPropertyValue\("disabled"\) === false[^)]*&&[^)]*figma\.selectedInstance\.getPropertyValue\("type"\) === "warning"[^)]*\)/,
+    )
+    expect(content).toContain('export default template')
   })
 })

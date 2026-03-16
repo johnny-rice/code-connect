@@ -143,7 +143,7 @@ async function convertStorybookFile({
       figmaNode: figmaStoryMetadata.url,
       source: config?.storybook?.url
         ? getStorybookUrl(componentMetadata.source, config.storybook.url)
-        : getRemoteFileUrl(componentMetadata.source, remoteUrl),
+        : getRemoteFileUrl(componentMetadata.source, remoteUrl, config?.defaultBranch),
       sourceLocation: { line: componentMetadata.line },
       template: '',
       templateData: {

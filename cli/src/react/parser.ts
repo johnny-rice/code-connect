@@ -16,6 +16,7 @@ import {
   parseFunctionArgument,
   isOneOf,
 } from '../typescript/compiler'
+import { applyDocumentUrlSubstitutions } from '../connect/helpers'
 import { FIGMA_CONNECT_CALL, PropMappings, parsePropsObject } from '../connect/intrinsics'
 import { CodeConnectJSON } from '../connect/figma_connect'
 import { getParsedTemplateHelpersString } from './parser_template_helpers'
@@ -904,10 +905,7 @@ export async function parseReactDoc(
   let figmaNode = stripQuotesFromNode(figmaNodeUrlArg)
   // TODO This logic is duplicated in connect.ts transformDocFromParser due to some type issues
   if (config.documentUrlSubstitutions) {
-    Object.entries(config.documentUrlSubstitutions).forEach(([from, to]) => {
-      // @ts-expect-error
-      figmaNode = figmaNode.replace(from, to)
-    })
+    figmaNode = applyDocumentUrlSubstitutions(figmaNode as string, config.documentUrlSubstitutions)
   }
   const metadata = componentArg
     ? await parseComponentMetadata(componentArg, parserContext, silent)
@@ -999,7 +997,9 @@ export async function parseReactDoc(
     label: DEFAULT_LABEL_PER_PARSER.react!,
     language: SyntaxHighlightLanguage.TypeScript,
     component: metadata?.component,
-    source: metadata?.source ? getRemoteFileUrl(metadata.source, repoUrl) : '',
+    source: metadata?.source
+      ? getRemoteFileUrl(metadata.source, repoUrl, parserContext.config?.defaultBranch)
+      : '',
     sourceLocation: metadata?.line !== undefined ? { line: metadata.line } : { line: -1 },
     variant,
     template,

@@ -3,6 +3,7 @@ import { readFileSync, rmSync, existsSync } from 'fs'
 import path from 'path'
 import { promisify } from 'util'
 import { tidyStdOutput } from '../../../__test__/utils'
+import { parseRawFile } from '../../raw_templates'
 
 describe('e2e test for `migrate` command', () => {
   const testParentPath = path.join(__dirname, 'e2e_migrate_command')
@@ -11,9 +12,9 @@ describe('e2e test for `migrate` command', () => {
     return path.join(testParentPath, testName)
   }
 
-  async function runMigrate(cwd: string, verbose = false) {
+  async function runMigrate(cwd: string, extraArgs = '') {
     return await promisify(exec)(
-      `npx tsx ../../../../../cli connect migrate --skip-update-check --remove-props${verbose ? ' --verbose' : ''}`,
+      `npx tsx ../../../../../cli connect migrate --skip-update-check --remove-props${extraArgs ? ' ' + extraArgs : ''}`,
       {
         cwd,
       },
@@ -21,7 +22,7 @@ describe('e2e test for `migrate` command', () => {
   }
 
   function cleanupTemplateFiles(testPath: string) {
-    const files = ['Button.figma.js', 'Avatar.figma.js']
+    const files = ['Button.figma.ts', 'Button.figma.js', 'Avatar.figma.ts', 'Avatar.figma.js']
     files.forEach((file) => {
       const filePath = path.join(testPath, file)
       if (existsSync(filePath)) {
@@ -30,45 +31,37 @@ describe('e2e test for `migrate` command', () => {
     })
   }
 
-  it('successfully migrates React Code Connect files to parserless templates', async () => {
+  it('successfully migrates React Code Connect files to parserless templates (JavaScript by default)', async () => {
     const testPath = getTestPath('react_basic')
 
     try {
       const result = await runMigrate(testPath)
 
-      // Check that the template files were created
+      // .figma.js files were created (not .figma.ts)
       const buttonTemplatePath = path.join(testPath, 'Button.figma.js')
       const avatarTemplatePath = path.join(testPath, 'Avatar.figma.js')
-
       expect(existsSync(buttonTemplatePath)).toBe(true)
       expect(existsSync(avatarTemplatePath)).toBe(true)
+      expect(existsSync(path.join(testPath, 'Button.figma.ts'))).toBe(false)
+      expect(existsSync(path.join(testPath, 'Avatar.figma.ts'))).toBe(false)
 
-      // Read the generated template files
+      // Read generated files
       const buttonTemplate = readFileSync(buttonTemplatePath, 'utf-8')
       const avatarTemplate = readFileSync(avatarTemplatePath, 'utf-8')
 
-      // Check that the URL comment is present
-      expect(buttonTemplate).toContain('// url=https://figma.com/test/button')
-      expect(avatarTemplate).toContain('// url=https://figma.com/test/avatar')
+      // Check key parts of output (v2 API, helpers, structure)
+      expect(buttonTemplate).toMatch(/const figma = require\("figma"\)/)
+      expect(buttonTemplate).toMatch(/figma\.selectedInstance\.getString/)
+      expect(buttonTemplate).toMatch(/figma\.selectedInstance\.getBoolean/)
+      expect(buttonTemplate).toMatch(/figma\.helpers\.react\.renderProp/)
+      expect(buttonTemplate).toMatch(
+        /export default \{[^]*id:[^]*imports:[^]*example:[^]*metadata:/,
+      )
 
-      // Check that v2 API methods are used
-      expect(buttonTemplate).toContain('figma.selectedInstance.getString')
-      expect(buttonTemplate).toContain('figma.selectedInstance.getBoolean')
-      expect(avatarTemplate).toContain('figma.selectedInstance.getString')
-
-      // Check that helpers have been migrated to server-side versions
-      expect(buttonTemplate).toContain('figma.helpers.react.renderProp')
-      expect(avatarTemplate).toContain('figma.helpers.react.renderProp')
-
-      // Check that the export format is v2 ({ id: ..., example: ... })
-      expect(buttonTemplate).toMatch(/export default\s*{\s*id:/s)
-      expect(avatarTemplate).toMatch(/export default\s*{\s*id:/s)
-      expect(buttonTemplate).toContain('example:')
-      expect(avatarTemplate).toContain('example:')
-
-      // Check that figma module is required
-      expect(buttonTemplate).toContain('const figma = require("figma")')
-      expect(avatarTemplate).toContain('const figma = require("figma")')
+      expect(avatarTemplate).toMatch(/const figma = require\("figma"\)/)
+      expect(avatarTemplate).toMatch(/figma\.selectedInstance\.getString/)
+      expect(avatarTemplate).toMatch(/figma\.helpers\.react\.renderProp/)
+      expect(avatarTemplate).toMatch(/export default \{[^]*id:[^]*imports:[^]*example:/)
 
       // Check that the templates contain the component usage
       expect(buttonTemplate).toContain('<Button')
@@ -79,8 +72,41 @@ describe('e2e test for `migrate` command', () => {
       // Check that __props has been removed (no longer needed for parserless templates)
       expect(buttonTemplate).not.toContain('__props')
 
-      // Check the stderr output for successful migration
+      // Verify the generated .figma.js files are valid — parseRawFile should succeed
+      const buttonParsed = parseRawFile(buttonTemplatePath, undefined)
+      expect(buttonParsed.figmaNode).toBeTruthy()
+      expect(buttonParsed.template).toBeTruthy()
+      const avatarParsed = parseRawFile(avatarTemplatePath, undefined)
+      expect(avatarParsed.figmaNode).toBeTruthy()
+      expect(avatarParsed.template).toBeTruthy()
+
+      // Check migration completed successfully
       expect(tidyStdOutput(result.stderr)).toContain('Migration complete')
+      expect(tidyStdOutput(result.stderr)).toContain('2 migrated')
+    } finally {
+      cleanupTemplateFiles(testPath)
+    }
+  })
+
+  it('outputs .figma.ts files when --typescript flag is passed', async () => {
+    const testPath = getTestPath('react_basic')
+
+    try {
+      const result = await runMigrate(testPath, '--typescript')
+
+      // .figma.ts files were created (not .figma.js)
+      const buttonTemplatePath = path.join(testPath, 'Button.figma.ts')
+      const avatarTemplatePath = path.join(testPath, 'Avatar.figma.ts')
+      expect(existsSync(buttonTemplatePath)).toBe(true)
+      expect(existsSync(avatarTemplatePath)).toBe(true)
+      expect(existsSync(path.join(testPath, 'Button.figma.js'))).toBe(false)
+      expect(existsSync(path.join(testPath, 'Avatar.figma.js'))).toBe(false)
+
+      // Verify the generated .figma.ts files are valid — parseRawFile should succeed
+      const buttonParsed = parseRawFile(buttonTemplatePath, undefined)
+      expect(buttonParsed.figmaNode).toBeTruthy()
+      expect(buttonParsed.template).toBeTruthy()
+
       expect(tidyStdOutput(result.stderr)).toContain('2 migrated')
     } finally {
       cleanupTemplateFiles(testPath)
@@ -115,35 +141,14 @@ describe('e2e test for `migrate` command', () => {
     try {
       const result = await runMigrate(testPath)
 
-      // Read the generated template file
       const buttonTemplatePath = path.join(testPath, 'Button.figma.js')
       const buttonTemplate = readFileSync(buttonTemplatePath, 'utf-8')
 
-      // Check that imports are present in the default export
-      expect(buttonTemplate).toContain('imports:')
-      expect(buttonTemplate).toMatch(/imports:\s*\[/)
+      // Check imports are in correct position: id, imports, example
+      expect(buttonTemplate).toMatch(
+        /id:\s*"[^"]+",\s*imports:\s*\[[^]*import \{ Button \}[^]*example:/,
+      )
 
-      // Check that the Button import is included (it should be extracted from the original file)
-      expect(buttonTemplate).toContain('import { Button }')
-      expect(buttonTemplate).toContain('./Button')
-
-      // Verify the imports are in the correct position (after id, before example)
-      const idMatch = buttonTemplate.match(/id:\s*"[^"]+",/)
-      const importsMatch = buttonTemplate.match(/imports:\s*\[/)
-      const exampleMatch = buttonTemplate.match(/example:/)
-
-      expect(idMatch).not.toBeNull()
-      expect(importsMatch).not.toBeNull()
-      expect(exampleMatch).not.toBeNull()
-
-      // Verify imports come after id
-      if (idMatch && importsMatch) {
-        expect(buttonTemplate.indexOf(idMatch[0])).toBeLessThan(
-          buttonTemplate.indexOf(importsMatch[0]),
-        )
-      }
-
-      // Check the stderr output
       expect(tidyStdOutput(result.stderr)).toContain('Migration complete')
     } finally {
       cleanupTemplateFiles(testPath)

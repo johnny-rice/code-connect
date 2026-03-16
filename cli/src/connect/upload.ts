@@ -5,6 +5,37 @@ import { exitWithFeedbackMessage } from './helpers'
 import { parseFigmaNode } from './validation'
 import { isFetchError, request } from '../common/fetch'
 
+const RETRY_DELAYS_MS = [5_000, 15_000, 30_000]
+
+async function postWithRetry<T>(
+  apiUrl: string,
+  batch: CodeConnectJSON[],
+  accessToken: string,
+): Promise<{ data: T }> {
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      return await request.post<T>(apiUrl, batch, { headers: getHeaders(accessToken) })
+    } catch (err) {
+      if (isFetchError(err) && (err.response.status === 429 || err.response.status >= 500)) {
+        if (attempt === RETRY_DELAYS_MS.length) {
+          throw err
+        }
+        const retryAfterSec = err.response.headers.get('Retry-After')
+        const delayMs = retryAfterSec
+          ? parseInt(retryAfterSec, 10) * 1_000
+          : RETRY_DELAYS_MS[attempt]
+        logger.warn(
+          `Received ${err.response.status}, retrying in ${delayMs / 1000}s (attempt ${attempt + 1}/${RETRY_DELAYS_MS.length})...`,
+        )
+        await new Promise((resolve) => setTimeout(resolve, delayMs))
+      } else {
+        throw err
+      }
+    }
+  }
+  throw new Error('Unreachable')
+}
+
 interface Args {
   accessToken: string
   docs: CodeConnectJSON[]
@@ -163,9 +194,7 @@ export async function upload({
 
         logger.debug(`Uploading ${size.toFixed(2)}mb to Figma`)
 
-        const response = await request.post<UploadResponse>(apiUrl, batch, {
-          headers: getHeaders(accessToken),
-        })
+        const response = await postWithRetry<UploadResponse>(apiUrl, batch, accessToken)
 
         const data = response.data
 
@@ -198,9 +227,7 @@ export async function upload({
       logger.debug(`Uploading ${size.toFixed(2)}mb to Figma`)
       logger.info(`uploading to ${apiUrl}`)
 
-      const response = await request.post<UploadResponse>(apiUrl, cleanedDocs, {
-        headers: getHeaders(accessToken),
-      })
+      const response = await postWithRetry<UploadResponse>(apiUrl, cleanedDocs, accessToken)
 
       const data = response.data
 

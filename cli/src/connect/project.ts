@@ -81,6 +81,12 @@ export type BaseCodeConnectConfig = {
    * Custom Figma API URL to use instead of https://api.figma.com/v1
    */
   apiUrl?: string
+
+  /**
+   * The default branch name for your repository. Code Connect uses this when generating source code
+   * links in Figma. If not specified, Code Connect will attempt to determine this automatically.
+   */
+  defaultBranch?: string
 }
 
 export type CodeConnectExecutableParserConfig = BaseCodeConnectConfig & {
@@ -450,13 +456,30 @@ export function getGitRepoAbsolutePath(filePath: string) {
 }
 
 /**
- * Find the default branch name (master or main) for the git repository
+ * Find the default branch name for the git repository
  */
-export function getGitRepoDefaultBranchName(repoPath: string) {
+export function getGitRepoDefaultBranchName(repoPath: string, configDefaultBranch?: string) {
   const DEFAULT_BRANCH_NAME = 'master'
 
+  if (configDefaultBranch) {
+    return configDefaultBranch
+  }
+
   try {
-    // Get all git branches
+    const symbolicRefResult = spawnSync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
+      cwd: repoPath,
+    })
+
+    if (symbolicRefResult.status === 0 && symbolicRefResult.stdout) {
+      const ref = symbolicRefResult.stdout.toString().trim()
+      // Output format: "refs/remotes/origin/<branch>" – take the last segment
+      const branch = ref.split('/').pop()
+      if (branch) {
+        return branch
+      }
+    }
+
+    // Fall back to scanning remote branches for known default branch names
     const gitBranchResult = spawnSync('git', ['branch', '-r'], {
       cwd: repoPath,
     })
@@ -489,7 +512,7 @@ export function getGitRepoDefaultBranchName(repoPath: string) {
  * @param repoURL remote URL, can be a GitHub, GitLab, Bitbucket, etc. URL.
  * @returns
  */
-export function getRemoteFileUrl(filePath: string, repoURL?: string) {
+export function getRemoteFileUrl(filePath: string, repoURL?: string, defaultBranch?: string) {
   if (!repoURL) {
     return ''
   }
@@ -510,7 +533,7 @@ export function getRemoteFileUrl(filePath: string, repoURL?: string) {
     // Windows uses \ as the path separator, so replace with /
     .replaceAll(path.sep, '/')
 
-  const defaultBranch = getGitRepoDefaultBranchName(repoAbsPath)
+  const resolvedDefaultBranch = getGitRepoDefaultBranchName(repoAbsPath, defaultBranch)
   const index = filePath.indexOf(repoAbsPath)
   if (index === -1) {
     return ''
@@ -519,26 +542,26 @@ export function getRemoteFileUrl(filePath: string, repoURL?: string) {
   const relativeFilePath = filePath.substring(index + repoAbsPath.length)
 
   if (url.includes('github.com')) {
-    return `${url}/blob/${defaultBranch}${relativeFilePath}`
+    return `${url}/blob/${resolvedDefaultBranch}${relativeFilePath}`
   } else if (url.includes('gitlab.com')) {
-    return `${url}/-/blob/${defaultBranch}${relativeFilePath}`
+    return `${url}/-/blob/${resolvedDefaultBranch}${relativeFilePath}`
   } else if (url.includes('bitbucket.org')) {
-    return `${url}/src/${defaultBranch}${relativeFilePath}`
+    return `${url}/src/${resolvedDefaultBranch}${relativeFilePath}`
   } else if (url.includes('dev.azure.com')) {
     // `git config --get remote.origin.url` for azure repos will return different strings depending on if it was
     // cloned with https or ssh. We need to convert this to a valid URL like "https://dev.azure.com/org/repo/_git/repo?path=/"
     if (repoURL.startsWith('git@')) {
       // ssh: "git@ssh.dev.azure.com:v3/org/repo/repo"
       const [org, project1, project2] = repoURL.split('/').slice(-3)
-      return `https://dev.azure.com/${org}/${project1}/_git/${project2}?path=${relativeFilePath}&branch=${defaultBranch}`
+      return `https://dev.azure.com/${org}/${project1}/_git/${project2}?path=${relativeFilePath}&branch=${resolvedDefaultBranch}`
     } else {
       // https: "https://org@dev.azure.com/org/repo/_git/repo"
       const [_, url] = repoURL.split('@')
-      return `https://${url}?path=${relativeFilePath}&branch=${defaultBranch}`
+      return `https://${url}?path=${relativeFilePath}&branch=${resolvedDefaultBranch}`
     }
   } else {
     logger.debug('Unknown remote URL - assuming GitHub Enterprise', url)
-    return `${url}/blob/${defaultBranch}${relativeFilePath}`
+    return `${url}/blob/${resolvedDefaultBranch}${relativeFilePath}`
   }
 }
 

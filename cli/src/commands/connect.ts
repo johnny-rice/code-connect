@@ -25,7 +25,7 @@ import { ParseRequestPayload, ParseResponsePayload } from '../connect/parser_exe
 import z from 'zod'
 import path from 'path'
 import { withUpdateCheck } from '../common/updates'
-import { exitWithFeedbackMessage } from '../connect/helpers'
+import { applyDocumentUrlSubstitutions, exitWithFeedbackMessage } from '../connect/helpers'
 import { parseHtmlDoc } from '../html/parser'
 import {
   InternalError,
@@ -36,8 +36,13 @@ import {
   ResolveImportsFn,
 } from '../connect/parser_common'
 import { findAndResolveImports, parseReactDoc } from '../react/parser'
-import { CodeConnectLabel, getInferredLanguageForRaw } from '../connect/label_language_mapping'
-import { groupCodeConnectObjectsByFigmaUrl, writeTemplateFile } from '../connect/migration_helpers'
+import { getInferredLanguageForRaw } from '../connect/label_language_mapping'
+import {
+  groupCodeConnectObjectsByFigmaUrl,
+  writeTemplateFile,
+  writeVariantTemplateFile,
+} from '../connect/migration_helpers'
+import { isRawTemplate, parseRawFile } from '../connect/raw_templates'
 import { convertRemoteFileUrlToRelativePath } from '../connect/wizard/run_wizard'
 import { getGitRepoAbsolutePath } from '../connect/project'
 
@@ -100,6 +105,10 @@ export function addConnectCommandToProgram(program: commander.Command) {
       '-b --batch-size <batch_size>',
       'optional batch size (in number of documents) to use when uploading. Use this if you hit "request too large" errors. See README for more information.',
     )
+    .option(
+      '--include-template-files',
+      '(Deprecated) No longer needed - template files are included by default. Will be removed in a future version.',
+    )
     .action(withUpdateCheck(handlePublish))
 
   addBaseCommand(
@@ -122,6 +131,10 @@ export function addConnectCommandToProgram(program: commander.Command) {
     'Run Code Connect locally to find any files that have figma connections, then converts them to JSON and outputs to stdout.',
   )
     .option('-l --label <label>', 'label to apply to the parsed files')
+    .option(
+      '--include-template-files',
+      '(Deprecated) No longer needed - template files are included by default. Will be removed in a future version.',
+    )
     .action(withUpdateCheck(handleParse))
 
   addBaseCommand(
@@ -144,6 +157,10 @@ export function addConnectCommandToProgram(program: commander.Command) {
       'directory to write template files (default: same directory as source file)',
     )
     .option('--remove-props', 'remove __props metadata blocks from migrated templates')
+    .option(
+      '--typescript',
+      'output migrated templates as TypeScript (.figma.ts) instead of JavaScript (.figma.js)',
+    )
     .action(withUpdateCheck(handleMigrate))
 }
 
@@ -188,97 +205,20 @@ function transformDocFromParser(
         throw new Error('Invalid URL scheme')
       }
     } catch (e) {
-      source = getRemoteFileUrl(source, remoteUrl)
+      source = getRemoteFileUrl(source, remoteUrl, config.defaultBranch)
     }
   }
 
   // TODO This logic is duplicated in parser.ts parseDoc due to some type issues
   let figmaNode = doc.figmaNode
   if (config.documentUrlSubstitutions) {
-    Object.entries(config.documentUrlSubstitutions).forEach(([from, to]) => {
-      figmaNode = figmaNode.replace(from, to)
-    })
+    figmaNode = applyDocumentUrlSubstitutions(figmaNode, config.documentUrlSubstitutions)
   }
 
   return {
     ...doc,
     source,
     figmaNode,
-  }
-}
-
-export function parseRawFile(
-  filePath: string,
-  label: string | undefined,
-  config?: CodeConnectConfig,
-  dir?: string,
-): CodeConnectJSON {
-  const fileContent = fs.readFileSync(filePath, 'utf-8')
-  const lines = fileContent.split('\n')
-  const fields: { url?: string; component?: string; source?: string } = {}
-  let templateStartIndex = 0
-
-  // Parse consecutive comment lines at the start of the file
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim()
-    // Match pattern: // fieldName=value
-    const match = line.match(/^\/\/\s*(\w+)=(.+)$/)
-    if (match) {
-      const [, fieldName, fieldValue] = match
-      const normalizedFieldName = fieldName.toLowerCase()
-      if (
-        normalizedFieldName === 'url' ||
-        normalizedFieldName === 'component' ||
-        normalizedFieldName === 'source'
-      ) {
-        fields[normalizedFieldName] = fieldValue.trim()
-      }
-      templateStartIndex = i + 1
-    } else if (line === '' || line.startsWith('//')) {
-      // Allow blank lines or other comments, but don't increment template start
-      continue
-    } else {
-      // First non-comment line found
-      break
-    }
-  }
-
-  if (!fields.url) {
-    throw new Error(
-      `Missing required url field in ${filePath}. Please add a // url=... comment to the top of the file.`,
-    )
-  }
-  let figmaNodeUrl = fields.url
-
-  const template = lines.slice(templateStartIndex).join('\n')
-
-  // Apply documentUrlSubstitutions if provided
-  if (config?.documentUrlSubstitutions) {
-    Object.entries(config.documentUrlSubstitutions).forEach(([from, to]) => {
-      figmaNodeUrl = figmaNodeUrl.replace(from, to)
-    })
-  }
-
-  // Determine effective label from parameter, config, or default
-  const effectiveLabel = label || config?.label || CodeConnectLabel.Code
-
-  const language = config?.language || getInferredLanguageForRaw(effectiveLabel)
-
-  return {
-    figmaNode: figmaNodeUrl,
-    component: fields.component,
-    template,
-    // nestable by default unless user specifies in template
-    // (templateData.nestable AND template.metadata.nestable need to
-    // be true for instance to be nested)
-    templateData: { nestable: true, isParserless: true },
-    language,
-    label: effectiveLabel,
-    source: fields.source || '',
-    sourceLocation: { line: -1 },
-    metadata: {
-      cliVersion: require('../../package.json').version,
-    },
   }
 }
 
@@ -364,9 +304,20 @@ export async function getCodeConnectObjects(
     }
   }
 
-  const rawTemplateFiles = projectInfo.files.filter(
-    (f: string) => f.endsWith('.figma.js') || f.endsWith('.figma.template.js'),
-  )
+  const rawTemplateFiles = projectInfo.files.filter((f: string) => {
+    // Suffix may be used by HTML / custom parsers
+    const isPotentialRawTemplate =
+      f.endsWith('.figma.js') ||
+      f.endsWith('.figma.template.js') ||
+      f.endsWith('.figma.ts') ||
+      f.endsWith('.figma.template.ts')
+    if (!isPotentialRawTemplate) return false
+    try {
+      return isRawTemplate(fs.readFileSync(f, 'utf-8'))
+    } catch {
+      return false
+    }
+  })
 
   if (rawTemplateFiles.length > 0) {
     // Resolve the label before parsing so language inference works correctly
@@ -515,9 +466,18 @@ async function handlePublish(
     skipValidation: boolean
     label: string
     batchSize: string
+    includeTemplateFiles?: boolean
   },
 ) {
   setupHandler(cmd)
+
+  // Show deprecation warning if the flag is used
+  if (cmd.includeTemplateFiles !== undefined) {
+    logger.warn(
+      '[Deprecated] The --include-template-files flag is no longer needed because template files are now included by default. ' +
+        "Please don't use this flag - it will be removed in a future version.",
+    )
+  }
 
   let dir = getDir(cmd)
   const projectInfo = await getProjectInfo(dir, cmd.config)
@@ -626,8 +586,16 @@ async function handleUnpublish(cmd: BaseCommand & { node: string; label: string 
   })
 }
 
-async function handleParse(cmd: BaseCommand & { label: string }) {
+async function handleParse(cmd: BaseCommand & { label: string; includeTemplateFiles?: boolean }) {
   setupHandler(cmd)
+
+  // Show deprecation warning if the flag is used
+  if (cmd.includeTemplateFiles !== undefined) {
+    logger.warn(
+      '[Deprecated] The --include-template-files flag is no longer needed because template files are now included by default. ' +
+        "Please don't use this flag - it will be removed in a future version.",
+    )
+  }
 
   const dir = cmd.dir ?? process.cwd()
   const projectInfo = await getProjectInfo(dir, cmd.config)
@@ -679,7 +647,10 @@ async function handleCreate(nodeUrl: string, cmd: BaseCommand) {
  * - Format as valid parserless file w/ url="" comment
  * - Name collisions are skipped, unless file is from migration (in which case add "_1")
  */
-async function handleMigrate(pattern: string | undefined, cmd: BaseCommand) {
+async function handleMigrate(
+  pattern: string | undefined,
+  cmd: BaseCommand & { typescript?: boolean },
+) {
   setupHandler(cmd)
 
   const dir = cmd.dir ?? process.cwd()
@@ -720,37 +691,26 @@ async function handleMigrate(pattern: string | undefined, cmd: BaseCommand) {
 
   const codeConnectObjectsByFigmaUrl = groupCodeConnectObjectsByFigmaUrl(allCodeConnectObjects)
 
-  const totalVariants = Object.values(codeConnectObjectsByFigmaUrl).reduce(
-    (acc, obj) => acc + obj.variants.length,
-    0,
-  )
-
-  // TODO support variants (for now filtering on non-variants)
-  const codeConnectObjects = Object.values(codeConnectObjectsByFigmaUrl).flatMap((obj) =>
-    obj.main ? [obj.main] : [],
-  )
-
-  if (codeConnectObjects.length === 0) {
+  const groupCount = Object.keys(codeConnectObjectsByFigmaUrl).length
+  if (groupCount === 0) {
     exitWithError('No Code Connect objects found to migrate')
   }
 
-  logger.info(`Found ${codeConnectObjects.length} Code Connect object(s) to migrate`)
+  logger.info(`Found ${groupCount} component(s) to migrate`)
   let migratedCount = 0
   let skippedCount = 0
   const errors: string[] = []
 
-  // Track file paths created during this migration run
   const filePathsCreated = new Set<string>()
-
-  // Get git root path for converting remote URLs to local paths
   const gitRootPath = getGitRepoAbsolutePath(dir)
+  const useTypeScript = !!cmd.typescript
 
-  // Migrate each Code Connect object to a template file
-  for (const doc of codeConnectObjects) {
+  for (const [figmaUrl, group] of Object.entries(codeConnectObjectsByFigmaUrl)) {
     try {
-      // Skip if no template (shouldn't happen, but be safe)
-      if (!doc.template) {
-        logger.warn(`Skipping ${doc.figmaNode}: no template found`)
+      const hasVariants = group.variants.length > 0
+      const representativeDoc = group.main ?? group.variants[0]
+      if (!representativeDoc?.template) {
+        logger.warn(`Skipping ${figmaUrl}: no template found`)
         skippedCount++
         continue
       }
@@ -758,40 +718,52 @@ async function handleMigrate(pattern: string | undefined, cmd: BaseCommand) {
       // Determine local source path for output location
       let localSourcePath: string | undefined
 
-      if (doc._codeConnectFilePath) {
+      if (representativeDoc._codeConnectFilePath) {
         // Use the Code Connect file path directly (preferred)
-        localSourcePath = doc._codeConnectFilePath
-      } else if (doc.source && gitRootPath) {
+        localSourcePath = representativeDoc._codeConnectFilePath
+      } else if (representativeDoc?.source && gitRootPath) {
         // Fallback: Convert remote file URL to local path
         const relativePath = convertRemoteFileUrlToRelativePath({
-          remoteFileUrl: doc.source,
+          remoteFileUrl: representativeDoc.source,
           gitRootPath,
           dir,
         })
         if (relativePath) {
-          // Convert relative path to absolute path for writeTemplateFile
           localSourcePath = path.resolve(dir, relativePath)
         }
       }
 
-      const { outputPath, skipped } = writeTemplateFile(
-        doc,
-        cmd.outDir,
-        dir,
-        localSourcePath,
-        filePathsCreated,
-        cmd.removeProps,
-      )
+      const { outputPath, skipped } = hasVariants
+        ? writeVariantTemplateFile(
+            group,
+            figmaUrl,
+            cmd.outDir,
+            dir,
+            localSourcePath,
+            filePathsCreated,
+            useTypeScript,
+          )
+        : writeTemplateFile(
+            representativeDoc,
+            cmd.outDir,
+            dir,
+            localSourcePath,
+            filePathsCreated,
+            cmd.removeProps,
+            useTypeScript,
+          )
 
       if (skipped) {
         logger.warn(`Skipping ${outputPath}: file already exists`)
         skippedCount++
       } else {
-        logger.info(`${success('✓')} Migrated to ${highlight(outputPath)}`)
+        logger.info(
+          `${success('✓')} Migrated${hasVariants ? ' (with variants)' : ''} to ${highlight(outputPath)}`,
+        )
         migratedCount++
       }
     } catch (error) {
-      const errorMsg = `Failed to migrate ${doc.figmaNode}: ${error}`
+      const errorMsg = `Failed to migrate ${figmaUrl}: ${error}`
       logger.error(errorMsg)
       errors.push(errorMsg)
     }
@@ -803,11 +775,11 @@ async function handleMigrate(pattern: string | undefined, cmd: BaseCommand) {
       if (fs.existsSync(configFilePath)) {
         logger.warn(`Config file already exists at ${highlight(configFilePath)}`)
       } else {
-        const { language: docLanguage, label } = codeConnectObjects[0]
+        const { language: docLanguage, label } = allCodeConnectObjects[0]
 
         const language = getInferredLanguageForRaw(label, docLanguage)
         const config: CodeConnectParserlessConfig = {
-          include: ['**/*.figma.js'],
+          include: [useTypeScript ? '**/*.figma.ts' : '**/*.figma.js'],
           language,
           label,
           ...(documentUrlSubstitutions && Object.keys(documentUrlSubstitutions).length > 0
@@ -825,12 +797,6 @@ async function handleMigrate(pattern: string | undefined, cmd: BaseCommand) {
   logger.info(
     `Migration complete: ${success(`${migratedCount} migrated`)}, ${skippedCount} skipped`,
   )
-
-  if (totalVariants > 0) {
-    logger.error(
-      `${error(`${totalVariants} variant restriction(s)`)} found, but not supported by the migration script yet`,
-    )
-  }
 
   if (errors.length > 0) {
     console.log('')

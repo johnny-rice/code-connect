@@ -1,3 +1,33 @@
+# Code Connect v1.4.2 (16th March 2026)
+
+## Fixed
+
+### General
+
+- Fixed incorrect `documentUrlSubstitutions` when one key is a prefix of another (e.g. `SearchInput` and `SearchInputMenu`). The CLI now processes longer keys first so the correct substitution is applied.
+- Publishing with `--batch-size` now retries automatically on rate-limit (429) and server error (5xx) responses, respecting the `Retry-After` header when present, rather than failing immediately
+- Fixed an issue around `.figma.js`/`.figma.ts` files being incorrectly treated as template files
+
+### CLI
+
+- The `--include-template-files` flag now shows a deprecation warning instead of causing an error. The flag is no longer necessary as template files are automatically included by default.
+
+## Features
+
+### General
+
+- Code Connect now supports default branch names other than `master`/`main`. For cases where it can't be detected automatically, you can set `defaultBranch` in your `figma.config.json`.
+
+### Template files
+
+- Variant restrictions are now handled by the `migrate` script. These are inlined into one template file with if/else blocks.
+- TypeScript is now supported for raw template files (`.figma.template.ts` / `.figma.ts`).
+  - ESM import syntax is now supported for the Figma API: `import figma from 'figma'`
+  - Type-only imports (`import type`) are supported
+  - Other module imports are not yet supported
+  - To enable types for the `figma` API, add `"@figma/code-connect/figma-types"` to the `types` array in your `tsconfig.json`.
+  - JavaScript files are the default output of the `migrate` command. Can pass `--typescript` to output TypeScript (`.figma.ts`) files instead.
+
 # Code Connect v1.4.1 (20th February 2026)
 
 ## Fixed

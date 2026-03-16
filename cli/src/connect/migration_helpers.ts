@@ -3,23 +3,58 @@ import path from 'path'
 import * as prettier from 'prettier'
 import { CodeConnectJSON } from '../connect/figma_connect'
 
-export function writeTemplateFile(
-  doc: CodeConnectJSON,
+/** Prettier configuration used for all generated template files */
+const PRETTIER_OPTIONS = {
+  parser: 'typescript' as const,
+  semi: false,
+  trailingComma: 'all' as const,
+  pluginSearchDirs: false as const,
+}
+
+/** Formats template code with consistent prettier configuration */
+function formatTemplate(code: string): string {
+  return prettier.format(code, PRETTIER_OPTIONS)
+}
+
+/**
+ * Common wrapper that handles path determination and file writing for both
+ * simple templates and variant templates.
+ */
+function writeTemplateFileCommon(
+  componentName: string,
+  fileContent: string,
   outputDir: string | undefined,
   baseDir: string,
-  localSourcePath?: string,
-  filePathsCreated?: Set<string>,
-  removeProps?: boolean,
+  localSourcePath: string | undefined,
+  filePathsCreated: Set<string> | undefined,
+  useTypeScript = true,
 ): { outputPath: string; skipped: boolean } {
-  const suffix = '.figma.js'
+  const suffix = useTypeScript ? '.figma.ts' : '.figma.js'
+  const baseOutputPath = determineOutputPath(
+    componentName,
+    suffix,
+    outputDir,
+    baseDir,
+    localSourcePath,
+  )
+  return writeFileWithDuplicateHandling(baseOutputPath, fileContent, suffix, filePathsCreated)
+}
 
-  // Determine base output filename
-  let baseOutputPath: string
-
+/**
+ * Determines the base output path for a template file.
+ * Shared logic between writeTemplateFile and writeVariantTemplateFile.
+ */
+function determineOutputPath(
+  componentName: string,
+  suffix: string,
+  outputDir: string | undefined,
+  baseDir: string,
+  localSourcePath: string | undefined,
+): string {
   if (outputDir) {
     // Use specified output directory
-    const filename = `${doc.component || 'template'}${suffix}`
-    baseOutputPath = path.join(outputDir, filename)
+    const filename = `${componentName}${suffix}`
+    return path.join(outputDir, filename)
   } else if (localSourcePath) {
     // Use same directory as local source file
     const sourceDir = path.dirname(localSourcePath)
@@ -38,13 +73,24 @@ export function writeTemplateFile(
     }
 
     const filename = `${sourceBasename}${suffix}`
-    baseOutputPath = path.join(sourceDir, filename)
+    return path.join(sourceDir, filename)
   } else {
     // No source info, use current directory
-    const filename = `${doc.component || 'template'}${suffix}`
-    baseOutputPath = path.join(baseDir, filename)
+    const filename = `${componentName}${suffix}`
+    return path.join(baseDir, filename)
   }
+}
 
+/**
+ * Handles file existence checking, duplicate name resolution, and writing.
+ * Shared logic between writeTemplateFile and writeVariantTemplateFile.
+ */
+function writeFileWithDuplicateHandling(
+  baseOutputPath: string,
+  fileContent: string,
+  suffix: string,
+  filePathsCreated: Set<string> | undefined,
+): { outputPath: string; skipped: boolean } {
   // Check if file already exists on disk (pre-existing file, not created in this run)
   const existsOnDisk = fs.existsSync(baseOutputPath)
   const createdInThisRun = filePathsCreated && filePathsCreated.has(baseOutputPath)
@@ -73,47 +119,6 @@ export function writeTemplateFile(
     } while ((filePathsCreated && filePathsCreated.has(outputPath)) || fs.existsSync(outputPath))
   }
 
-  let template = doc.template
-
-  template = removeSwiftHelpers(template)
-  // Helpers have not been injected - replace reference with server-side versions
-  template = migrateTemplateToUseServerSideHelpers(template)
-  // Remove __props definition and from metadata (if flag is set)
-  if (removeProps) {
-    template = removePropsDefinitionAndMetadata(template)
-  }
-  // V1 -> V2 codemods
-  template = migrateV1TemplateToV2(template)
-  // Add required id to template (set to TODO if no usable name)
-  template = addId(template, doc.component || 'TODO')
-  // Add imports if present
-  template = addImports(template, doc.templateData?.imports)
-  // Add nestable to metadata (default to false)
-  template = addNestableToMetadata(template, !!doc.templateData?.nestable)
-  // Format for ease of use
-  template = prettier.format(template, {
-    parser: 'typescript',
-    semi: false,
-    trailingComma: 'all',
-    // pluginSearchDirs: false is needed as otherwise prettier picks up other
-    // prettier plugins in our monorepo and fails with race condition errors
-    pluginSearchDirs: false,
-  })
-
-  // Create the template file content
-
-  // Build comment header lines
-  const commentLines: string[] = [`// url=${doc.figmaNode}`] // URL is required
-  if (doc.source) {
-    commentLines.push(`// source=${doc.source}`)
-  }
-  if (doc.component) {
-    commentLines.push(`// component=${doc.component}`)
-  }
-  commentLines.push(``)
-
-  const fileContent = commentLines.join('\n') + '\n' + template
-
   // Ensure output directory exists
   const outputDirPath = path.dirname(outputPath)
   if (!fs.existsSync(outputDirPath)) {
@@ -129,6 +134,98 @@ export function writeTemplateFile(
   }
 
   return { outputPath, skipped: false }
+}
+
+/** Migrates a doc's template (Swift helpers, server helpers, V2, id, imports, nestable) and returns the formatted string. */
+export function prepareMigratedTemplate(
+  doc: CodeConnectJSON,
+  removeProps?: boolean,
+  useTypeScript?: boolean,
+): string {
+  let template = doc.template
+  template = removeSwiftHelpers(template)
+  template = migrateTemplateToUseServerSideHelpers(template)
+  if (removeProps) {
+    template = removePropsDefinitionAndMetadata(template)
+  }
+  template = migrateV1TemplateToV2(template)
+  template = addId(template, doc.component || 'TODO')
+  template = addImports(template, doc.templateData?.imports)
+  template = addNestableToMetadata(template, !!doc.templateData?.nestable)
+  if (useTypeScript) {
+    template = convertSyntaxToTypeScript(template)
+  }
+  return formatTemplate(template)
+}
+
+function removeSwiftHelpers(template: string): string {
+  return template.replace(
+    `function __fcc_renderSwiftChildren(children, prefix) {
+  if (children === undefined) {
+    return children
+  }
+  return children.flatMap((child, index) => {
+    if (child.type === 'CODE') {
+      let code = child.code.split('\\n').map((line) => {
+        return line.trim() !== '' ? \`\${prefix}\${line}\` : line;
+      }).join('\\n')
+      if (index !== children.length - 1) {
+        code = code + '\\n'
+      }
+      return {
+        ...child,
+        code: code,
+      }
+    } else {
+        let elements = []
+        const shouldAddNewline = index > 0 && children[index - 1].type === 'CODE' && !children[index - 1].code.endsWith('\\n')
+        elements.push({ type: 'CODE', code: \`\${shouldAddNewline ? '\\n' : ''}\${prefix}\` })
+        elements.push(child)
+        if (index !== children.length - 1) {
+            elements.push({ type: 'CODE', code: '\\n' })
+        }
+        return elements
+    }
+  })
+}
+`,
+    '',
+  )
+}
+
+export function writeTemplateFile(
+  doc: CodeConnectJSON,
+  outputDir: string | undefined,
+  baseDir: string,
+  localSourcePath?: string,
+  filePathsCreated?: Set<string>,
+  removeProps?: boolean,
+  useTypeScript = true,
+): { outputPath: string; skipped: boolean } {
+  const componentName = doc.component || 'template'
+  const template = prepareMigratedTemplate(doc, removeProps, useTypeScript)
+
+  // Build comment header lines
+  const commentLines: string[] = [`// url=${doc.figmaNode}`]
+  if (doc.source) {
+    commentLines.push(`// source=${doc.source}`)
+  }
+  if (doc.component) {
+    commentLines.push(`// component=${doc.component}`)
+  }
+  commentLines.push(``)
+
+  const fileContent = commentLines.join('\n') + '\n' + template
+
+  return writeTemplateFileCommon(
+    componentName,
+    fileContent,
+    outputDir,
+    baseDir,
+    localSourcePath,
+    filePathsCreated,
+    useTypeScript,
+  )
 }
 
 // Renames must match helpers in code_connect_js_api.raw_source.ts
@@ -355,37 +452,108 @@ export const groupCodeConnectObjectsByFigmaUrl = (codeConnectObjects: CodeConnec
   )
 }
 
-function removeSwiftHelpers(template: string): string {
-  return template.replace(
-    `function __fcc_renderSwiftChildren(children, prefix) {
-  if (children === undefined) {
-    return children
-  }
-  return children.flatMap((child, index) => {
-    if (child.type === 'CODE') {
-      let code = child.code.split('\\n').map((line) => {
-        return line.trim() !== '' ? \`\${prefix}\${line}\` : line;
-      }).join('\\n')
-      if (index !== children.length - 1) {
-        code = code + '\\n'
-      }
-      return {
-        ...child,
-        code: code,
-      }
-    } else {
-        let elements = []
-        const shouldAddNewline = index > 0 && children[index - 1].type === 'CODE' && !children[index - 1].code.endsWith('\\n')
-        elements.push({ type: 'CODE', code: \`\${shouldAddNewline ? '\\n' : ''}\${prefix}\` })
-        elements.push(child)
-        if (index !== children.length - 1) {
-            elements.push({ type: 'CODE', code: '\\n' })
-        }
-        return elements
+/** One parserless file per component: branch per variant, each with its own props and template object; export default template. */
+export function writeVariantTemplateFile(
+  group: CodeConnectObjectsForFigmaUrl,
+  figmaUrl: string,
+  outputDir: string | undefined,
+  baseDir: string,
+  localSourcePath?: string,
+  filePathsCreated?: Set<string>,
+  useTypeScript = true,
+): { outputPath: string; skipped: boolean } {
+  const variantDocs = group.variants.map((v) => ({ doc: v, variant: v.variant }))
+  const defaultDoc = group.main ? { doc: group.main, variant: null } : null
+  const componentName = (group.main ?? group.variants[0])?.component || 'template'
+
+  // Migrate templates and extract their full code (no deduplication)
+  const allDocs = [...variantDocs, ...(defaultDoc ? [defaultDoc] : [])]
+  const migratedTemplates = allDocs.map(({ doc }) => prepareMigratedTemplate(doc, useTypeScript))
+  const exportDefaultPrefix = 'export default '
+
+  // For each template, replace 'export default' with 'template =' and remove figma require
+  const branches = migratedTemplates.map((t) => {
+    if (!t.includes(exportDefaultPrefix)) {
+      throw new Error(`Variant merge: no "export default" in template for ${figmaUrl}`)
     }
+
+    // Replace 'export default' with 'template ='
+    let branchCode = t.replace(exportDefaultPrefix, 'template = ')
+
+    // Remove only the top-level figma require, keep everything else
+    const lines = branchCode.split('\n')
+    const filteredLines = lines.filter((line) => !line.trim().startsWith('const figma = require'))
+
+    return filteredLines.join('\n').trim()
   })
-}
-`,
+
+  // Build the variant switch structure using conditions for all variant properties
+  const ifParts: string[] = []
+  for (let i = 0; i < variantDocs.length; i++) {
+    const { variant } = variantDocs[i]
+    const branchCode = branches[i]
+
+    if (variant && Object.keys(variant).length > 0) {
+      // Build condition from all properties in the variant
+      const condition = Object.entries(variant)
+        .map(
+          ([key, val]) =>
+            `figma.selectedInstance.getPropertyValue('${key}') === ${typeof val === 'string' ? `'${val}'` : val}`,
+        )
+        .join(' && ')
+
+      ifParts.push(`${ifParts.length ? '} else ' : ''}if (${condition}) {\n${branchCode}`)
+    }
+  }
+
+  // Add default/fallback branch (use the last doc: main if present, otherwise first variant)
+  const defaultBranchCode = branches[branches.length - 1]
+
+  ifParts.push(`} else {\n${defaultBranchCode}\n}`)
+
+  const variantComment =
+    group.main != null
+      ? `// Branch per variant combination.`
+      : `// Branch per variant; no default, else first.`
+
+  const templateBody = [
+    "const figma = require('figma')",
     '',
+    variantComment,
+    '',
+    'let template',
+    ifParts.join('\n'),
+    '',
+    'export default template',
+  ].join('\n')
+
+  const formatted = formatTemplate(templateBody)
+
+  // Build comment header with url, source, and component
+  // Use the representative doc (main or first variant) for source/component values
+  const representativeDoc = group.main ?? group.variants[0]
+  const commentLines: string[] = [`// url=${figmaUrl}`]
+  if (representativeDoc?.source) {
+    commentLines.push(`// source=${representativeDoc.source}`)
+  }
+  if (representativeDoc?.component) {
+    commentLines.push(`// component=${representativeDoc.component}`)
+  }
+  commentLines.push(``)
+
+  const fileContent = commentLines.join('\n') + '\n' + formatted
+
+  return writeTemplateFileCommon(
+    componentName,
+    fileContent,
+    outputDir,
+    baseDir,
+    localSourcePath,
+    filePathsCreated,
+    useTypeScript,
   )
+}
+
+function convertSyntaxToTypeScript(template: string): string {
+  return template.replace(/const __props = {}/, 'const __props: Record<string, unknown> = {}')
 }

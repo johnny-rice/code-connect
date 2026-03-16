@@ -1,5 +1,10 @@
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { spawnSync } from 'child_process'
 import {
   CodeConnectReactConfig,
+  getGitRepoDefaultBranchName,
   getRemoteFileUrl,
   mapImportPath,
   mapImportSpecifier,
@@ -209,6 +214,66 @@ describe('Project helper functions', () => {
       expect(
         getRemoteFileUrl('/path/file.ts', 'https://my-custom-domain.com/myorg/myrepo.git'),
       ).toBe('https://my-custom-domain.com/myorg/myrepo/blob/master/path/file.ts')
+    })
+
+    it('uses explicit defaultBranch when provided', () => {
+      expect(
+        getRemoteFileUrl('/path/file.ts', 'https://github.com/myorg/myrepo.git', 'release'),
+      ).toBe('https://github.com/myorg/myrepo/blob/release/path/file.ts')
+    })
+  })
+
+  describe('getGitRepoDefaultBranchName', () => {
+    let tmpDir: string
+
+    // Minimal git identity so operations don't fail with "Please tell me who you are"
+    const gitEnv = {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'Test',
+      GIT_AUTHOR_EMAIL: 'test@test.com',
+      GIT_COMMITTER_NAME: 'Test',
+      GIT_COMMITTER_EMAIL: 'test@test.com',
+    }
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'code-connect-branch-test-'))
+      spawnSync('git', ['init'], { cwd: tmpDir, env: gitEnv })
+      spawnSync('git', ['remote', 'add', 'origin', 'https://example.com/repo.git'], {
+        cwd: tmpDir,
+        env: gitEnv,
+      })
+    })
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    })
+
+    it('returns configDefaultBranch without inspecting the repo', () => {
+      // Pass a non-existent path to confirm the config value short-circuits
+      expect(getGitRepoDefaultBranchName('/does/not/exist', 'release')).toBe('release')
+    })
+
+    it('detects an arbitrary default branch via symbolic-ref', () => {
+      spawnSync(
+        'git',
+        ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/develop'],
+        { cwd: tmpDir, env: gitEnv },
+      )
+      expect(getGitRepoDefaultBranchName(tmpDir)).toBe('develop')
+    })
+
+    it('falls back to "main" from branch list when symbolic-ref is not set', () => {
+      // Write a fake remote tracking ref so `git branch -r` lists origin/main
+      fs.mkdirSync(path.join(tmpDir, '.git', 'refs', 'remotes', 'origin'), { recursive: true })
+      fs.writeFileSync(
+        path.join(tmpDir, '.git', 'refs', 'remotes', 'origin', 'main'),
+        '0000000000000000000000000000000000000001\n',
+      )
+      expect(getGitRepoDefaultBranchName(tmpDir)).toBe('main')
+    })
+
+    it('falls back to "master" when no branch info is available', () => {
+      expect(getGitRepoDefaultBranchName(tmpDir)).toBe('master')
     })
   })
 })
