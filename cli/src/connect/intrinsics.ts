@@ -472,7 +472,11 @@ function replaceNewlines(str: string) {
   return str.toString().replaceAll('\n', '\\n').replaceAll("'", "\\'")
 }
 
-export function valueToString(value: ValueMappingKind, childLayer?: string) {
+export function valueToString(
+  value: ValueMappingKind,
+  childLayer?: string,
+  isForMigration?: boolean,
+) {
   if (typeof value === 'boolean' || typeof value === 'number' || typeof value === 'undefined') {
     return `${value}`
   }
@@ -483,7 +487,7 @@ export function valueToString(value: ValueMappingKind, childLayer?: string) {
 
   if ('kind' in value) {
     // Mappings can be nested, e.g. an enum value can be figma.instance(...)
-    return `${intrinsicToString(value as Intrinsic, childLayer)}`
+    return `${intrinsicToString(value as Intrinsic, childLayer, isForMigration)}`
   }
 
   // Convert objects to strings
@@ -510,14 +514,18 @@ export function valueToString(value: ValueMappingKind, childLayer?: string) {
   }
 }
 
-export function valueMappingToString(valueMapping: ValueMapping, childLayer?: string): string {
+export function valueMappingToString(
+  valueMapping: ValueMapping,
+  childLayer?: string,
+  isForMigration?: boolean,
+): string {
   // For enums (and booleans with a valueMapping provided), convert the
   // value mapping to an object.
   return (
     '{\n' +
     Object.entries(valueMapping)
       .map(([key, value]) => {
-        return `"${key}": ${valueToString(value, childLayer)}`
+        return `"${key}": ${valueToString(value, childLayer, isForMigration)}`
       })
       .join(',\n') +
     '}'
@@ -529,6 +537,7 @@ let nestedLayerCount = 0
 export function intrinsicToString(
   { kind, args, modifiers = [] }: Intrinsic,
   childLayer?: string,
+  isForMigration?: boolean,
 ): string {
   const selector = childLayer ?? `figma.currentLayer`
   switch (kind) {
@@ -549,14 +558,14 @@ export function intrinsicToString(
     }
     case IntrinsicKind.Boolean: {
       if (args.valueMapping) {
-        const mappingString = valueMappingToString(args.valueMapping, childLayer)
+        const mappingString = valueMappingToString(args.valueMapping, childLayer, isForMigration)
         // Outputs: `const propName = figma.properties.boolean('propName', { ... mapping object from above ... })`
         return `${selector}.__properties__.boolean('${args.figmaPropName}', ${mappingString})`
       }
       return `${selector}.__properties__.boolean('${args.figmaPropName}')`
     }
     case IntrinsicKind.Enum: {
-      const mappingString = valueMappingToString(args.valueMapping, childLayer)
+      const mappingString = valueMappingToString(args.valueMapping, childLayer, isForMigration)
 
       // Outputs: `const propName = figma.properties.enum('propName', { ... mapping object from above ... })`
       return `${selector}.__properties__.enum('${args.figmaPropName}', ${mappingString})`
@@ -570,7 +579,7 @@ export function intrinsicToString(
     }
     case IntrinsicKind.ClassName: {
       // Outputs: `const propName = ['btn-base', figma.currentLayer.__properties__.enum('Size, { Large: 'btn-large' })].join(" ")`
-      return `[${args.className.map((className) => (typeof className === 'string' ? `"${className}"` : `${intrinsicToString(className, childLayer)}`)).join(', ')}].filter(v => !!v).join(' ')`
+      return `[${args.className.map((className) => (typeof className === 'string' ? `"${className}"` : `${intrinsicToString(className, childLayer, isForMigration)}`)).join(', ')}].filter(v => !!v).join(' ')`
     }
     case IntrinsicKind.TextContent: {
       return `${selector}.__findChildWithCriteria__({ name: '${args.layer}', type: "TEXT" }).__render__()`
@@ -584,11 +593,24 @@ export function intrinsicToString(
       // currently is to keep the error checking out of global scope
       const nestedLayerRef = `nestedLayer${nestedLayerCount++}`
       body += `const ${nestedLayerRef} = figma.currentLayer.__find__("${args.layer}")\n`
-      body += `return ${nestedLayerRef}.type === "ERROR" ? ${nestedLayerRef} : {
+      if (isForMigration) {
+        // Generate a TypeScript-safe pattern that always returns the object shape.
+        // The error case uses `undefined` per-property so the result is always
+        // `{ key: T | undefined }`, avoiding the `ErrorHandle | { key: T }` union
+        // that would require optional chaining at every call site.
+        body += `return {\n${Object.entries(args.props)
+          .map(
+            ([key, intrinsic]) =>
+              `${key}: ${nestedLayerRef}.type !== "ERROR" ? ${intrinsicToString(intrinsic, nestedLayerRef, isForMigration)} : undefined,\n`,
+          )
+          .join('')}\n        }\n`
+      } else {
+        body += `return ${nestedLayerRef}.type === "ERROR" ? ${nestedLayerRef} : {
 ${Object.entries(args.props).map(
-  ([key, intrinsic]) => `${key}: ${intrinsicToString(intrinsic, nestedLayerRef)}\n`,
+  ([key, intrinsic]) => `${key}: ${intrinsicToString(intrinsic, nestedLayerRef, isForMigration)}\n`,
 )}
         }\n`
+      }
       return `(function () {${body}})()`
     }
     default:
